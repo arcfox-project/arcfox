@@ -44,16 +44,16 @@ def _build_base_url_candidates(base_url: str) -> list[str]:
         host_root = f"{parsed.scheme}://{parsed.netloc}"
         host_api = f"{host_root}/api"
         for candidate in (
+            "https://napi.arcfox.cn",
+            "https://napi.arcfox.cn/api",
+            "https://arcfoxapp-new-iov.bjev.com.cn",
+            "https://arcfoxapp-new-iov.bjev.com.cn/api",
             "https://hbt-app-rsa-pre.bjev.com.cn",
             "https://hbt-app-rsa-pre.bjev.com.cn/api",
             "https://hbt-app-rsa.bjev.com.cn",
             "https://hbt-app-rsa.bjev.com.cn/api",
             host_root,
             host_api,
-            "https://napi.arcfox.cn",
-            "https://napi.arcfox.cn/api",
-            "https://arcfoxapp-new-iov.bjev.com.cn",
-            "https://arcfoxapp-new-iov.bjev.com.cn/api",
         ):
             if candidate not in candidates:
                 candidates.append(candidate)

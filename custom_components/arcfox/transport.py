@@ -6,8 +6,11 @@ import asyncio
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 import logging
+import ssl
 from typing import Any
 from collections.abc import Iterable
+from pathlib import Path
+from urllib.parse import urlsplit
 
 from aiohttp import ClientError, ClientResponseError, ClientSession
 
@@ -75,6 +78,7 @@ class ArcfoxHttpTransport(ArcfoxTransport):
         self._session = session
         self._base_urls = self._normalize_base_urls(base_urls)
         self._timeout = timeout
+        self._ssl_context = self._build_bjev_ssl_context()
 
     @staticmethod
     def _normalize_base_urls(base_urls: Iterable[str]) -> list[str]:
@@ -89,6 +93,21 @@ class ArcfoxHttpTransport(ArcfoxTransport):
     @staticmethod
     def _join_base_url(base_url: str, path: str) -> str:
         return f"{base_url}{path}"
+
+    @staticmethod
+    def _build_bjev_ssl_context() -> ssl.SSLContext | None:
+        cert_path = Path(__file__).with_name("certs") / "baic_root_ca.pem"
+        if not cert_path.exists():
+            return None
+        context = ssl.create_default_context()
+        context.load_verify_locations(cafile=str(cert_path))
+        return context
+
+    def _ssl_for_url(self, url: str) -> ssl.SSLContext | None:
+        host = urlsplit(url).hostname or ""
+        if host.endswith(".bjev.com.cn"):
+            return self._ssl_context
+        return None
 
     async def request_json(
         self,
@@ -114,6 +133,7 @@ class ArcfoxHttpTransport(ArcfoxTransport):
                         method,
                         url,
                         headers=request_headers,
+                        ssl=self._ssl_for_url(url),
                         **kwargs,
                     )
                     response.raise_for_status()
