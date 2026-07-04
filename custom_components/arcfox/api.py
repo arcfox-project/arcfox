@@ -38,25 +38,28 @@ _LOGGER = logging.getLogger(__name__)
 def _build_base_url_candidates(base_url: str) -> list[str]:
     """Build a small ordered set of API base URL candidates."""
     normalized = base_url.rstrip("/")
-    candidates = [normalized]
+    candidates: list[str] = []
     parsed = urlsplit(normalized)
     if parsed.scheme and parsed.netloc:
         host_root = f"{parsed.scheme}://{parsed.netloc}"
         host_api = f"{host_root}/api"
         for candidate in (
+            "https://hbt-app-rsa.bjev.com.cn",
+            "https://hbt-app-rsa.bjev.com.cn/api",
             "https://napi.arcfox.cn",
             "https://napi.arcfox.cn/api",
             "https://arcfoxapp-new-iov.bjev.com.cn",
             "https://arcfoxapp-new-iov.bjev.com.cn/api",
             "https://hbt-app-rsa-pre.bjev.com.cn",
             "https://hbt-app-rsa-pre.bjev.com.cn/api",
-            "https://hbt-app-rsa.bjev.com.cn",
-            "https://hbt-app-rsa.bjev.com.cn/api",
             host_root,
             host_api,
+            normalized,
         ):
             if candidate not in candidates:
                 candidates.append(candidate)
+    elif normalized not in candidates:
+        candidates.append(normalized)
     return candidates
 
 

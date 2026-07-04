@@ -19,7 +19,7 @@ PLATFORMS: Final = (
 
 DEFAULT_NAME: Final = "ARCFOX"
 DEFAULT_REGION: Final = "cn"
-DEFAULT_BASE_URL: Final = "https://hbt-app-rsa-pre.bjev.com.cn"
+DEFAULT_BASE_URL: Final = "https://hbt-app-rsa.bjev.com.cn"
 DEFAULT_SCAN_INTERVAL_MINUTES: Final = 5
 DEFAULT_TIMEOUT: Final = 20
 
