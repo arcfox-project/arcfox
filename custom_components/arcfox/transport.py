@@ -1,0 +1,206 @@
+"""Transport abstraction for ARCFOX requests."""
+
+from __future__ import annotations
+
+import asyncio
+from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
+import logging
+from typing import Any
+from collections.abc import Iterable
+
+from aiohttp import ClientError, ClientResponseError, ClientSession
+
+from .bctp import BctpPublishRequest, build_publish_request
+from .models import ArcfoxVehicle
+from .protocol import ArcfoxCommandPayload, ArcfoxCommandSpec
+
+_LOGGER = logging.getLogger(__name__)
+
+class ArcfoxTransportError(Exception):
+    """Base transport error."""
+
+
+class ArcfoxTransportAuthError(ArcfoxTransportError):
+    """Transport authentication error."""
+
+
+class ArcfoxTransport(ABC):
+    """Abstract transport contract for ARCFOX backends."""
+
+    @abstractmethod
+    async def request_json(
+        self,
+        method: str,
+        path: str,
+        *,
+        headers: dict[str, str] | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Perform a request and return a JSON object."""
+
+    async def post_command(
+        self,
+        path: str,
+        *,
+        headers: dict[str, str] | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Post a command payload."""
+        return await self.request_json("post", path, headers=headers, json=payload or {})
+
+
+class ArcfoxCommandTransport(ABC):
+    """Abstract transport for remote-control command delivery."""
+
+    @abstractmethod
+    async def send_command(
+        self,
+        vehicle: ArcfoxVehicle | str,
+        *,
+        action: str,
+        spec: ArcfoxCommandSpec,
+        payload: ArcfoxCommandPayload | None,
+        seq: int = 1,
+        st: int = 0,
+        business_code: str | None = None,
+    ) -> Any:
+        """Send a remote-control command."""
+
+
+class ArcfoxHttpTransport(ArcfoxTransport):
+    """HTTP transport used by the current placeholder API implementation."""
+
+    def __init__(self, session: ClientSession, base_urls: Iterable[str], timeout: int) -> None:
+        self._session = session
+        self._base_urls = self._normalize_base_urls(base_urls)
+        self._timeout = timeout
+
+    @staticmethod
+    def _normalize_base_urls(base_urls: Iterable[str]) -> list[str]:
+        normalized: list[str] = []
+        for base_url in base_urls:
+            candidate = base_url.strip().rstrip("/")
+            if not candidate or candidate in normalized:
+                continue
+            normalized.append(candidate)
+        return normalized
+
+    @staticmethod
+    def _join_base_url(base_url: str, path: str) -> str:
+        return f"{base_url}{path}"
+
+    async def request_json(
+        self,
+        method: str,
+        path: str,
+        *,
+        headers: dict[str, str] | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        request_headers = {"Accept": "application/json"}
+        if headers:
+            request_headers.update(headers)
+
+        last_error: Exception | None = None
+        auth_error: ArcfoxTransportAuthError | None = None
+
+        for base_url in self._base_urls:
+            url = self._join_base_url(base_url, path)
+            _LOGGER.debug("ARCFOX HTTP request: %s %s", method.upper(), url)
+            try:
+                async with asyncio.timeout(self._timeout):
+                    response = await self._session.request(
+                        method,
+                        url,
+                        headers=request_headers,
+                        **kwargs,
+                    )
+                    response.raise_for_status()
+                    data = await response.json(content_type=None)
+            except ClientResponseError as err:
+                _LOGGER.warning(
+                    "ARCFOX HTTP response error for %s %s: status=%s",
+                    method.upper(),
+                    url,
+                    err.status,
+                )
+                if err.status in {401, 403}:
+                    auth_error = ArcfoxTransportAuthError(f"Authentication failed: {err.status}")
+                    last_error = auth_error
+                    continue
+                last_error = ArcfoxTransportError(f"ARCFOX HTTP error: {err.status}")
+                continue
+            except (ClientError, TimeoutError, ValueError) as err:
+                _LOGGER.exception("ARCFOX HTTP request failed for %s %s", method.upper(), url)
+                last_error = ArcfoxTransportError(f"ARCFOX request failed: {err}")
+                continue
+
+            if not isinstance(data, dict):
+                _LOGGER.warning("ARCFOX HTTP response was not a JSON object for %s %s", method.upper(), url)
+                last_error = ArcfoxTransportError("ARCFOX API did not return a JSON object")
+                continue
+            return data
+
+        if auth_error is not None:
+            raise auth_error
+        if last_error is not None:
+            raise last_error
+        raise ArcfoxTransportError("ARCFOX API did not return a usable response")
+
+
+class ArcfoxBctpTransport(ArcfoxCommandTransport):
+    """BCTP transport scaffold for future MQTT publishing."""
+
+    def __init__(
+        self,
+        publisher: Callable[[str, dict[str, Any]], Awaitable[None]],
+        *,
+        token_getter: Callable[[], str],
+        topic_channel: str = "bctp",
+        topic_product: str = "N5",
+        topic_scope: str = "standard",
+        topic_target: str = "terminal",
+        topic_suffix: str = "topic/21",
+    ) -> None:
+        self._publisher = publisher
+        self._token_getter = token_getter
+        self._topic_channel = topic_channel
+        self._topic_product = topic_product
+        self._topic_scope = topic_scope
+        self._topic_target = topic_target
+        self._topic_suffix = topic_suffix
+
+    async def send_command(
+        self,
+        vehicle: ArcfoxVehicle | str,
+        *,
+        action: str,
+        spec: ArcfoxCommandSpec,
+        payload: ArcfoxCommandPayload | None,
+        seq: int = 1,
+        st: int = 0,
+        business_code: str | None = None,
+    ) -> BctpPublishRequest:
+        """Build and publish a BCTP command envelope."""
+        token = self._token_getter()
+        if not token:
+            raise ArcfoxTransportError("Missing access token for BCTP command transport")
+        request = build_publish_request(
+            vehicle,
+            action=action,
+            spec=spec,
+            payload=payload,
+            token=token,
+            seq=seq,
+            st=st,
+            business_code=business_code,
+            topic_channel=self._topic_channel,
+            topic_product=self._topic_product,
+            topic_scope=self._topic_scope,
+            topic_target=self._topic_target,
+            topic_suffix=self._topic_suffix,
+        )
+        _LOGGER.debug("ARCFOX BCTP publish request: %s", request.to_dict())
+        await self._publisher(request.topic, request.envelope.to_dict())
+        return request

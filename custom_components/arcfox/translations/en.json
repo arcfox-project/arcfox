@@ -1,0 +1,165 @@
+{
+  "title": "ARCFOX",
+  "config": {
+    "step": {
+        "user": {
+          "title": "Connect ARCFOX vehicle",
+          "description": "Enter your ARCFOX account details. You can either import an existing app session with an access token or request an SMS code. VIN is optional.",
+          "data": {
+            "user_id": "User ID / phone",
+            "vin": "VIN (optional)",
+            "access_token": "Access token (optional)",
+            "refresh_token": "Refresh token (optional)",
+            "base_url": "API base URL",
+            "region": "Region",
+            "scan_interval": "Polling interval (minutes)",
+            "timeout": "Timeout (seconds)"
+          }
+      },
+      "sms": {
+        "title": "Enter verification code",
+        "description": "Enter the SMS verification code sent by ARCFOX.",
+        "data": {
+          "sms_code": "Verification code"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the ARCFOX service.",
+      "invalid_auth": "Authentication failed.",
+      "unknown": "Unexpected error."
+    },
+    "abort": {
+      "already_configured": "This account is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "ARCFOX options",
+        "data": {
+          "base_url": "API base URL",
+          "scan_interval": "Polling interval (minutes)",
+          "timeout": "Timeout (seconds)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "battery_pct": {
+        "name": "Battery"
+      },
+      "range_km": {
+        "name": "Range"
+      },
+      "odometer_km": {
+        "name": "Odometer"
+      },
+      "inside_temp_c": {
+        "name": "Inside temperature"
+      },
+      "outside_temp_c": {
+        "name": "Outside temperature"
+      },
+      "connection_source": {
+        "name": "Connection source"
+      }
+    },
+    "binary_sensor": {
+      "charging": {
+        "name": "Charging"
+      },
+      "plugged_in": {
+        "name": "Plugged in"
+      },
+      "server_data_ready": {
+        "name": "Server data ready"
+      }
+    },
+    "lock": {
+      "door_lock": {
+        "name": "Door lock"
+      }
+    },
+    "switch": {
+      "climate": {
+        "name": "Climate"
+      },
+      "steering_wheel_heat": {
+        "name": "Steering wheel heat"
+      },
+      "front_defrost": {
+        "name": "Front defrost"
+      },
+      "rear_defrost": {
+        "name": "Rear defrost"
+      },
+      "seat_comfort_master": {
+        "name": "Seat comfort master"
+      }
+    },
+    "number": {
+      "climate_target_temp": {
+        "name": "Climate target temperature"
+      }
+    },
+    "select": {
+      "left_front_seat_heat": {
+        "name": "Left front seat heat"
+      },
+      "right_front_seat_heat": {
+        "name": "Right front seat heat"
+      },
+      "left_back_seat_heat": {
+        "name": "Left back seat heat"
+      },
+      "right_back_seat_heat": {
+        "name": "Right back seat heat"
+      },
+      "left_front_seat_wind": {
+        "name": "Left front seat wind"
+      },
+      "right_front_seat_wind": {
+        "name": "Right front seat wind"
+      },
+      "left_back_seat_wind": {
+        "name": "Left back seat wind"
+      },
+      "right_back_seat_wind": {
+        "name": "Right back seat wind"
+      }
+    },
+    "device_tracker": {
+      "location": {
+        "name": "Location"
+      }
+    },
+    "button": {
+      "wake_up": {
+        "name": "Wake up"
+      },
+      "window_open": {
+        "name": "Open window"
+      },
+      "window_close": {
+        "name": "Close window"
+      },
+      "sunroof_open": {
+        "name": "Open sunroof"
+      },
+      "sunroof_close": {
+        "name": "Close sunroof"
+      },
+      "trunk_open": {
+        "name": "Open trunk"
+      },
+      "flash_honk": {
+        "name": "Flash and honk"
+      },
+      "refresh": {
+        "name": "Refresh"
+      }
+    }
+  }
+}

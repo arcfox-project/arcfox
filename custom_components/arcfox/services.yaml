@@ -1,0 +1,77 @@
+send_command:
+  name: Send command
+  description: Send a remote command to a vehicle.
+  fields:
+    vehicle_id:
+      required: true
+      example: "LF1A1234567890123"
+      selector:
+        text:
+    action:
+      required: true
+      example: "lock"
+      selector:
+        select:
+          options:
+            - lock
+            - unlock
+            - climate_on
+            - climate_off
+            - set_climate_temperature
+            - steering_wheel_heat_on
+            - steering_wheel_heat_off
+            - front_defrost_on
+            - front_defrost_off
+            - rear_defrost_on
+            - rear_defrost_off
+            - seat_comfort_master_on
+            - seat_comfort_master_off
+            - seat_heat
+            - seat_wind
+            - wake_up
+            - window_open
+            - window_close
+            - sunroof_open
+            - sunroof_close
+            - trunk_open
+            - flash_honk
+    seat:
+      example: "left_front"
+      selector:
+        select:
+          options:
+            - left_front
+            - right_front
+            - left_back
+            - right_back
+    mode:
+      example: "heat"
+      selector:
+        select:
+          options:
+            - heat
+            - wind
+    option:
+      example: "level_1"
+      selector:
+        text:
+    temperature:
+      example: 21
+      selector:
+        number:
+          min: 16
+          max: 30
+          step: 0.5
+          mode: box
+    enabled:
+      example: true
+      selector:
+        boolean:
+    level:
+      example: 1
+      selector:
+        number:
+          min: 0
+          max: 3
+          step: 1
+          mode: slider

@@ -1,0 +1,16 @@
+{
+  "name": "ARCFOX",
+  "content_in_root": false,
+  "country": "CN",
+  "domains": [
+    "sensor",
+    "binary_sensor",
+    "lock",
+    "switch",
+    "device_tracker",
+    "button"
+  ],
+  "homeassistant": "2024.12.0",
+  "iot_class": "cloud_polling",
+  "render_readme": true
+}

@@ -1,0 +1,165 @@
+{
+  "title": "极狐",
+  "config": {
+    "step": {
+        "user": {
+          "title": "连接极狐车辆",
+          "description": "输入极狐账号信息。你可以导入已经登录的 app 会话（access token），也可以继续走短信验证码。VIN 可选。",
+          "data": {
+            "user_id": "用户ID / 手机号",
+            "vin": "车架号 VIN（可选）",
+            "access_token": "Access token（可选）",
+            "refresh_token": "Refresh token（可选）",
+            "base_url": "接口基础地址",
+            "region": "区域",
+            "scan_interval": "轮询间隔（分钟）",
+            "timeout": "超时（秒）"
+          }
+      },
+      "sms": {
+        "title": "输入验证码",
+        "description": "输入极狐发送的短信验证码。",
+        "data": {
+          "sms_code": "验证码"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "无法连接到极狐服务。",
+      "invalid_auth": "认证失败。",
+      "unknown": "发生未知错误。"
+    },
+    "abort": {
+      "already_configured": "该账号已配置。"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "极狐选项",
+        "data": {
+          "base_url": "接口基础地址",
+          "scan_interval": "轮询间隔（分钟）",
+          "timeout": "超时（秒）"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "battery_pct": {
+        "name": "电量"
+      },
+      "range_km": {
+        "name": "续航"
+      },
+      "odometer_km": {
+        "name": "总里程"
+      },
+      "inside_temp_c": {
+        "name": "车内温度"
+      },
+      "outside_temp_c": {
+        "name": "车外温度"
+      },
+      "connection_source": {
+        "name": "连接来源"
+      }
+    },
+    "binary_sensor": {
+      "charging": {
+        "name": "充电中"
+      },
+      "plugged_in": {
+        "name": "已插枪"
+      },
+      "server_data_ready": {
+        "name": "服务器数据已取回"
+      }
+    },
+    "lock": {
+      "door_lock": {
+        "name": "车门锁"
+      }
+    },
+    "switch": {
+      "climate": {
+        "name": "空调"
+      },
+      "steering_wheel_heat": {
+        "name": "方向盘加热"
+      },
+      "front_defrost": {
+        "name": "前除霜"
+      },
+      "rear_defrost": {
+        "name": "后除霜"
+      },
+      "seat_comfort_master": {
+        "name": "座椅舒适总开关"
+      }
+    },
+    "number": {
+      "climate_target_temp": {
+        "name": "空调设定温度"
+      }
+    },
+    "select": {
+      "left_front_seat_heat": {
+        "name": "左前座椅加热"
+      },
+      "right_front_seat_heat": {
+        "name": "右前座椅加热"
+      },
+      "left_back_seat_heat": {
+        "name": "左后座椅加热"
+      },
+      "right_back_seat_heat": {
+        "name": "右后座椅加热"
+      },
+      "left_front_seat_wind": {
+        "name": "左前座椅通风"
+      },
+      "right_front_seat_wind": {
+        "name": "右前座椅通风"
+      },
+      "left_back_seat_wind": {
+        "name": "左后座椅通风"
+      },
+      "right_back_seat_wind": {
+        "name": "右后座椅通风"
+      }
+    },
+    "device_tracker": {
+      "location": {
+        "name": "位置"
+      }
+    },
+    "button": {
+      "wake_up": {
+        "name": "唤醒车辆"
+      },
+      "window_open": {
+        "name": "打开车窗"
+      },
+      "window_close": {
+        "name": "关闭车窗"
+      },
+      "sunroof_open": {
+        "name": "打开天窗"
+      },
+      "sunroof_close": {
+        "name": "关闭天窗"
+      },
+      "trunk_open": {
+        "name": "打开后备箱"
+      },
+      "flash_honk": {
+        "name": "闪灯鸣笛"
+      },
+      "refresh": {
+        "name": "刷新"
+      }
+    }
+  }
+}
