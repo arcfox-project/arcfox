@@ -7,6 +7,19 @@ import re
 from typing import Any
 
 
+def _split_coordinates(value: Any) -> tuple[float | None, float | None]:
+    """Parse ARCFOX coordinate strings like '116.431076;40.065837'."""
+    if value in (None, ""):
+        return None, None
+    if isinstance(value, str):
+        parts = [part.strip() for part in value.split(";")]
+        if len(parts) == 2:
+            longitude = _coerce_float(parts[0])
+            latitude = _coerce_float(parts[1])
+            return latitude, longitude
+    return None, None
+
+
 def _dig(payload: dict[str, Any] | None, *paths: tuple[str, ...] | str) -> Any:
     """Fetch a value from nested dictionaries using several candidate paths."""
     if not payload:
@@ -195,6 +208,15 @@ class ArcfoxVehicle:
             )
             or vehicle_id
         )
+        fallback_latitude, fallback_longitude = _split_coordinates(
+            _find_any(combined, "carLocation")
+            or _dig(
+                combined,
+                ("status", "carLocation"),
+                ("vehicleState", "carLocation"),
+                ("dataBean", "carLocation"),
+            )
+        )
 
         return cls(
             vehicle_id=vehicle_id,
@@ -217,6 +239,7 @@ class ArcfoxVehicle:
                     "vcuSoc",
                     "batteryCapacity",
                     "batteryStatus",
+                    "currentBattery",
                     "battery",
                 )
                 or _dig(
@@ -233,6 +256,9 @@ class ArcfoxVehicle:
                     ("vehicleState", "chargeLeft"),
                     ("vehicleState", "vcuSoc"),
                     ("vehicleState", "batteryCapacity"),
+                    ("vehicleState", "currentBattery"),
+                    ("status", "currentBattery"),
+                    ("dataBean", "currentBattery"),
                     ("vehicleInfo", "soc"),
                     ("vehicleData", "soc"),
                     ("battery", "percent"),
@@ -244,10 +270,14 @@ class ArcfoxVehicle:
                     "rangeKm",
                     "range_km",
                     "enduranceMileage",
+                    "sumRemainingMileage",
+                    "cltcRemainingMileage",
+                    "wltcRemainingMileage",
+                    "nedcRemainingMileage",
+                    "drvMileage",
                     "limitedDriving",
+                    "mileage",
                     "current",
-                    "kmTotal",
-                    "odometer",
                     "vehicleRange",
                     "vcuSumRemainingMileage",
                     "vcuWltcRemainingMileage",
@@ -257,9 +287,14 @@ class ArcfoxVehicle:
                 or _dig(
                     combined,
                     ("status", "rangeKm"),
+                    ("status", "sumRemainingMileage"),
+                    ("status", "cltcRemainingMileage"),
+                    ("status", "wltcRemainingMileage"),
+                    ("status", "nedcRemainingMileage"),
+                    ("status", "drvMileage"),
                     ("status", "limitedDriving"),
+                    ("status", "mileage"),
                     ("status", "current"),
-                    ("status", "kmTotal"),
                     ("status", "enduranceMileage"),
                     ("status", "vcuSumRemainingMileage"),
                     ("status", "vcuWltcRemainingMileage"),
@@ -267,9 +302,14 @@ class ArcfoxVehicle:
                     ("status", "vcuCltcRemainingMileage"),
                     ("status", "vehicleRange"),
                     ("vehicleState", "rangeKm"),
+                    ("vehicleState", "sumRemainingMileage"),
+                    ("vehicleState", "cltcRemainingMileage"),
+                    ("vehicleState", "wltcRemainingMileage"),
+                    ("vehicleState", "nedcRemainingMileage"),
+                    ("vehicleState", "drvMileage"),
                     ("vehicleState", "limitedDriving"),
+                    ("vehicleState", "mileage"),
                     ("vehicleState", "current"),
-                    ("vehicleState", "kmTotal"),
                     ("vehicleState", "enduranceMileage"),
                     ("vehicleState", "vcuSumRemainingMileage"),
                     ("vehicleState", "vcuWltcRemainingMileage"),
@@ -277,6 +317,11 @@ class ArcfoxVehicle:
                     ("vehicleState", "vcuCltcRemainingMileage"),
                     ("vehicleState", "vehicleRange"),
                     ("vehicleInfo", "rangeKm"),
+                    ("vehicleInfo", "sumRemainingMileage"),
+                    ("vehicleInfo", "cltcRemainingMileage"),
+                    ("vehicleInfo", "wltcRemainingMileage"),
+                    ("vehicleInfo", "nedcRemainingMileage"),
+                    ("vehicleInfo", "drvMileage"),
                     ("battery", "range"),
                 )
             ),
@@ -285,24 +330,29 @@ class ArcfoxVehicle:
                     combined,
                     "odometerKm",
                     "odometer_km",
-                    "mileage",
                     "totalMileage",
+                    "totalMileageValue",
                     "kmTotal",
                     "totalMileageKm",
                     "vehicleMileage",
-                    "totalMileageValue",
+                    "mileage",
                 )
                 or _dig(
                     combined,
                     ("status", "odometerKm"),
-                    ("status", "mileage"),
-                    ("status", "kmTotal"),
                     ("status", "totalMileage"),
+                    ("status", "totalMileageValue"),
+                    ("status", "kmTotal"),
+                    ("status", "mileage"),
                     ("vehicleState", "odometerKm"),
-                    ("vehicleState", "mileage"),
-                    ("vehicleState", "kmTotal"),
                     ("vehicleState", "totalMileage"),
                     ("vehicleState", "totalMileageValue"),
+                    ("vehicleState", "kmTotal"),
+                    ("vehicleState", "mileage"),
+                    ("dataBean", "totalMileage"),
+                    ("dataBean", "totalMileageValue"),
+                    ("dataBean", "kmTotal"),
+                    ("dataBean", "mileage"),
                     ("vehicle", "mileage"),
                 )
             ),
@@ -338,7 +388,9 @@ class ArcfoxVehicle:
                     combined,
                     "climateOn",
                     "airConditionOn",
+                    "airState",
                     ("status", "climateOn"),
+                    ("status", "airState"),
                     ("hvac", "running"),
                 )
             ),
@@ -507,13 +559,6 @@ class ArcfoxVehicle:
                     ("seat", "rightBackWindLevel"),
                 )
             ),
-            latitude=_coerce_float(
-                _dig(position, "latitude", "lat") or _dig(combined, "latitude", "lat")
-            ),
-            longitude=_coerce_float(
-                _dig(position, "longitude", "lng", "lon")
-                or _dig(combined, "longitude", "lng", "lon")
-            ),
             inside_temp_c=_coerce_float(
                 _find_any(
                     combined,
@@ -521,12 +566,15 @@ class ArcfoxVehicle:
                     "insideTemperature",
                     "inTemp",
                     "cabinTemp",
+                    "airTemperature",
                 )
                 or _dig(
                     combined,
                     "insideTemp",
                     ("status", "insideTemp"),
                     ("status", "insideTemperature"),
+                    ("status", "airTemperature"),
+                    ("dataBean", "airTemperature"),
                     ("hvac", "insideTemp"),
                 )
             ),
@@ -537,14 +585,28 @@ class ArcfoxVehicle:
                     "outsideTemperature",
                     "outTemp",
                     "ambientTemp",
+                    "batteryTemperature",
+                    "driveTemperature",
                 )
                 or _dig(
                     combined,
                     "outsideTemp",
                     ("status", "outsideTemp"),
                     ("status", "outsideTemperature"),
+                    ("status", "driveTemperature"),
+                    ("dataBean", "driveTemperature"),
                     ("hvac", "outsideTemp"),
                 )
+            ),
+            latitude=_coerce_float(
+                _dig(position, "latitude", "lat")
+                or _dig(combined, "latitude", "lat")
+                or fallback_latitude
+            ),
+            longitude=_coerce_float(
+                _dig(position, "longitude", "lng", "lon")
+                or _dig(combined, "longitude", "lng", "lon")
+                or fallback_longitude
             ),
             raw=combined,
         )

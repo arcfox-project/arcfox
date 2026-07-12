@@ -4,12 +4,14 @@
     "step": {
         "user": {
           "title": "Connect ARCFOX vehicle",
-          "description": "Enter your ARCFOX account details. You can either import an existing app session with an access token or request an SMS code. VIN is optional.",
+          "description": "Import an ARCFOX App access token, or provide an App token plus account password for B2C login. VIN is optional; legacy SDK SMS login is not the default flow.",
           "data": {
             "user_id": "User ID / phone",
             "vin": "VIN (optional)",
             "access_token": "Access token (optional)",
             "refresh_token": "Refresh token (optional)",
+            "app_token": "App token (required for password login)",
+            "password": "ARCFOX App password (optional)",
             "base_url": "API base URL",
             "region": "Region",
             "scan_interval": "Polling interval (minutes)",

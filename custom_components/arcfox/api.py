@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import time
+import uuid
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -34,6 +36,105 @@ class ArcfoxAuthError(ArcfoxApiError):
 
 _LOGGER = logging.getLogger(__name__)
 
+CAR_STATUS_QUERY_KEYS = (
+    "gps,kmTotal,limitedDriving,current,chargingleft,soc,insideTemperature,"
+    "chrgDchaPwrDisp,InsdPM25DataDisp,status.statusDataSendTime,status.S3,"
+    "status.S4,status.S9,status.S10,status.S16,status.S22,status.S27,status.S30,"
+    "status.S32,status.S33,status.S34,status.S37,status.S38,status.S39,status.S41,"
+    "status.S42,status.S43,status.S44,status.S45,status.S46,status.S47,status.S48,"
+    "status.S49,status.S50,status.S51,status.S52,status.S53,status.S61,status.S62,"
+    "status.S63,status.S65,status.S66,status.S67,status.S71,status.S73,status.S74,"
+    "status.S75,status.S76,status.S77,status.S80,status.S82,status.S83,status.S84,"
+    "status.S85,status.S86,status.S87,status.S88,status.S89,status.S90,status.S91,"
+    "status.S92,status.S93,status.S94,status.S95,status.S96,status.S97,status.S98,"
+    "status.S99,status.S100,status.S101,status.S102,status.S103,status.S105,"
+    "status.S106,status.S107,status.S108,status.S109,status.S112,status.S116,"
+    "status.S121,status.S125,status.S126,status.S128,status.S134,status.S135,"
+    "status.S136,status.S147limitedDriving,fuelSoc,fuelMilge,fuelMilgVld,"
+    "evMilgVld,soc,status.S140,status.S138,status.S139,status.S141,status.S142,"
+    "status.S143,status.S144,status.S145,status.S155,status.S149,status.S150,"
+    "status.S153,status.S166"
+)
+
+
+def _extract_status_payload(data: Any) -> dict[str, Any] | None:
+    """Normalize the various ARCFOX status wrapper shapes into a flat payload."""
+    if isinstance(data, list):
+        for item in data:
+            payload = _extract_status_payload(item)
+            if payload:
+                return payload
+        return None
+
+    if not isinstance(data, dict):
+        return None
+
+    for key in (
+        "data",
+        "dataBean",
+        "vehicleState",
+        "vehicleStatus",
+        "vehicleInfo",
+        "status",
+        "result",
+        "body",
+        "energy",
+        "report",
+    ):
+        value = data.get(key)
+        if isinstance(value, dict):
+            nested = _extract_status_payload(value)
+            return nested or value
+        if isinstance(value, list):
+            nested = _extract_status_payload(value)
+            if nested:
+                return nested
+
+    if any(
+        key in data
+        for key in (
+            "soc",
+            "kmTotal",
+            "limitedDriving",
+            "current",
+            "chargingleft",
+            "vehicleState",
+            "status",
+            "battery",
+            "currentBattery",
+            "mileage",
+            "totalMileage",
+            "carLocation",
+            "airTemperature",
+            "sumRemainingMileage",
+            "cltcRemainingMileage",
+            "wltcRemainingMileage",
+            "nedcRemainingMileage",
+            "drvMileage",
+            "chargeStatus",
+        )
+    ):
+        return data
+
+    return None
+
+
+def _merge_status_payload(target: dict[str, Any], payload: dict[str, Any]) -> None:
+    """Merge known status wrappers into a single flat payload."""
+    target.update(payload)
+
+    vehicle_info = payload.get("vehicleInfo")
+    if isinstance(vehicle_info, dict):
+        target.update(vehicle_info)
+        vehicle_status = vehicle_info.get("vehicleStatus")
+        if isinstance(vehicle_status, dict):
+            target.update(vehicle_status)
+
+    for key in ("vehicleStatus", "status", "vehicleState", "dataBean", "energy", "report"):
+        nested = payload.get(key)
+        if isinstance(nested, dict):
+            target.update(nested)
+
 
 def _build_base_url_candidates(base_url: str) -> list[str]:
     """Build a small ordered set of API base URL candidates."""
@@ -44,17 +145,24 @@ def _build_base_url_candidates(base_url: str) -> list[str]:
         host_root = f"{parsed.scheme}://{parsed.netloc}"
         host_api = f"{host_root}/api"
         for candidate in (
+            normalized,
+            "https://sdkserver-be12.bjev.com.cn/api",
+            "https://sdkserver-be12-pub.bjev.com.cn/api",
+            "https://sdkserver-n5.bjev.com.cn/api",
+            "https://sdkserver-n80.bjev.com.cn/api",
+            "https://sdkserver.bjev.com.cn/api",
             "https://hbt-app-rsa.bjev.com.cn",
             "https://hbt-app-rsa.bjev.com.cn/api",
             "https://napi.arcfox.cn",
             "https://napi.arcfox.cn/api",
+            "https://mg.arcfox.cn",
+            "https://mg.arcfox.cn/api",
             "https://arcfoxapp-new-iov.bjev.com.cn",
             "https://arcfoxapp-new-iov.bjev.com.cn/api",
             "https://hbt-app-rsa-pre.bjev.com.cn",
             "https://hbt-app-rsa-pre.bjev.com.cn/api",
             host_root,
             host_api,
-            normalized,
         ):
             if candidate not in candidates:
                 candidates.append(candidate)
@@ -80,8 +188,11 @@ class ArcfoxApiClient:
         region: str,
         timeout: int,
         access_token: str | None = None,
+        app_token: str | None = None,
+        password: str | None = None,
         sms_code: str | None = None,
         refresh_token: str | None = None,
+        security_code: str | None = None,
         command_transport: ArcfoxCommandTransport | None = None,
         auth_state_callback: Any | None = None,
     ) -> None:
@@ -90,7 +201,12 @@ class ArcfoxApiClient:
         self._region = region
         self._sms_code = sms_code
         self._access_token: str | None = access_token or None
+        self._app_token: str | None = app_token or None
+        self._password: str | None = password or None
         self._refresh_token: str | None = refresh_token
+        self._security_code: str | None = security_code or None
+        self._remote_control_token: str | None = None
+        self._remote_control_token_at: float | None = None
         self._account_id: str | None = None
         self._auth_data: dict[str, Any] | None = None
         self._last_request_path: str | None = None
@@ -147,6 +263,9 @@ class ArcfoxApiClient:
         if self._access_token:
             return self._account_id or self._vin
 
+        if self._password:
+            return await self._async_b2c_password_login()
+
         if self._refresh_token and not self._sms_code:
             _LOGGER.debug(
                 "ARCFOX authenticating with refresh token for vin=%s user_id=%s",
@@ -173,6 +292,38 @@ class ArcfoxApiClient:
         data = await self._request("post", "/auth/signin", json=payload)
         self._store_auth_data(data)
         return self._account_id or self._vin
+
+    async def _async_b2c_password_login(self) -> str:
+        """Log in through the current ARCFOX B2C account service.
+
+        The mobile app obtains an application token before its account login. It
+        is intentionally supplied by the user rather than embedded here because
+        application credentials are private and may be rotated by ARCFOX.
+        """
+        if not self._app_token:
+            raise ArcfoxAuthError(
+                "Password login requires a current ARCFOX App token; import an App access token instead"
+            )
+        payload = {
+            "method": "password",
+            "device": {
+                "id": str(uuid.uuid4()),
+                "model": "Home Assistant ARCFOX",
+                "type": 1,
+            },
+            "passwordCredential": {
+                "account": self._user_id,
+                "password": self._password,
+            },
+        }
+        data = await self._request_b2c(
+            "post",
+            "/vcam/v1/auth/accounts/login",
+            headers={"Authorization": self._app_token, "token_type": "app_token"},
+            json=payload,
+        )
+        self._store_auth_data(data)
+        return self._account_id or self._user_id
 
     async def async_request_sms_code(self) -> None:
         """Request an SMS verification code for login."""
@@ -216,6 +367,8 @@ class ArcfoxApiClient:
     async def async_get_vehicles(self) -> list[ArcfoxVehicle]:
         """Fetch all vehicles associated with the account."""
         await self._ensure_authenticated()
+        if self._password or self._is_b2c_access_token():
+            return await self._async_get_b2c_vehicles()
         vehicle_items: list[dict[str, Any]] = []
 
         if self._vin:
@@ -375,48 +528,112 @@ class ArcfoxApiClient:
 
         return vehicles
 
+    async def _async_get_b2c_vehicles(self) -> list[ArcfoxVehicle]:
+        """Fetch vehicles from the account API used by current ARCFOX apps."""
+        if not self._access_token:
+            return []
+        account = await self._request_b2c("get", "/vcam/v1/accounts/base")
+        self._store_account_id(account)
+        payload = await self._request_b2c("get", "/vcam/v1/accounts/vehicles")
+
+        raw_items: Any = payload.get("data", payload)
+        if isinstance(raw_items, dict):
+            raw_items = raw_items.get("vehicles") or raw_items.get("list") or []
+        if not isinstance(raw_items, list):
+            return []
+        vehicles: list[ArcfoxVehicle] = []
+        for item in raw_items:
+            if not isinstance(item, dict):
+                continue
+            vehicle_id = item.get("vehicleId") or item.get("id")
+            vin = item.get("vin") or item.get("VIN")
+            if not vehicle_id and not vin:
+                continue
+            normalized = {
+                **item,
+                "vehicleId": str(vehicle_id or vin),
+                "vin": str(vin or vehicle_id),
+                "vehicleName": (
+                    item.get("vehicleAliasName")
+                    or item.get("aliasName")
+                    or item.get("vehicleName")
+                    or vin
+                    or vehicle_id
+                ),
+                "arcfox_connection_source": "b2c_vehicle_list",
+            }
+            vehicles.append(ArcfoxVehicle.from_payload(normalized))
+        return vehicles
+
+    def _is_b2c_access_token(self) -> bool:
+        """Return whether the current token has the JWT shape used by B2C."""
+        return bool(self._access_token and self._access_token.count(".") == 2)
+
     async def async_get_vehicle_status(self, vehicle_id: str) -> dict[str, Any]:
         """Fetch the status for a single vehicle."""
         await self._ensure_authenticated()
-        candidates = (
-            f"/rc/bctp/carState/query/{vehicle_id}",
-            f"/rc/battery/info/{vehicle_id}",
-            f"/rc/battery/info?vehicleId={vehicle_id}",
+        header_vehicle_id = str(vehicle_id)
+        shared_user_headers = {
+            "X-Vehicle-Id": header_vehicle_id,
+            "token_type": "user_token",
+        }
+        candidates: tuple[tuple[str, str, dict[str, str] | None, dict[str, Any] | None], ...] = (
+            (
+                "post",
+                "/vctrl/v2/controls/dynamic-infos",
+                shared_user_headers,
+                {
+                    # QueryDynamicInfosReq is a set of String fields.  The
+                    # official app uses an empty string to request each
+                    # section; JSON booleans are not equivalent here.
+                    "vehicleStatus": "",
+                    "charge": "",
+                    "location": "",
+                    "door": "",
+                    "window": "",
+                    "seat": "",
+                    "hvac": "",
+                    "lamp": "",
+                    "fuel": "",
+                    "airConditionPlan": "",
+                    "departurePlan": "",
+                    "sentryPlan": "",
+                    "tire": "",
+                    "warmCoolingBox": "",
+                    "welcome": "",
+                },
+            ),
+            ("get", "/vdas/v1/report/energy/latest", shared_user_headers, None),
+            ("get", "/vdas/v1/report/energy/account/latest", shared_user_headers, None),
+            (
+                "get",
+                f"/rc/bctp/carState/query/{vehicle_id}?queryKeys={CAR_STATUS_QUERY_KEYS}",
+                None,
+                None,
+            ),
+            ("get", f"/rc/battery/info/{vehicle_id}", None, None),
+            ("get", f"/rc/battery/info?vehicleId={vehicle_id}", None, None),
         )
         last_error: Exception | None = None
-        for path in candidates:
-            _LOGGER.debug("ARCFOX probing vehicle status path: %s", path)
+        combined: dict[str, Any] = {}
+        for method, path, headers, json_payload in candidates:
+            _LOGGER.debug("ARCFOX probing vehicle status endpoint: %s %s", method.upper(), path)
             try:
-                data = await self._request("get", path)
+                request_kwargs: dict[str, Any] = {}
+                if headers:
+                    request_kwargs["headers"] = headers
+                if json_payload is not None:
+                    request_kwargs["json"] = json_payload
+                data = await self._request(method, path, **request_kwargs)
             except ArcfoxApiError as err:
                 last_error = err
                 continue
+            payload = _extract_status_payload(data)
+            if payload is not None:
+                _merge_status_payload(combined, payload)
 
-            if isinstance(data.get("data"), dict):
-                return data["data"]
-            if isinstance(data.get("data"), list) and data["data"]:
-                first_item = data["data"][0]
-                if isinstance(first_item, dict):
-                    return first_item
-            if isinstance(data, list) and data:
-                first_item = data[0]
-                if isinstance(first_item, dict):
-                    return first_item
-            if isinstance(data, dict) and any(
-                key in data
-                for key in (
-                    "soc",
-                    "kmTotal",
-                    "limitedDriving",
-                    "current",
-                    "chargingleft",
-                    "vehicleState",
-                    "status",
-                    "battery",
-                )
-            ):
-                return data
-
+        if combined:
+            return combined
         if last_error is not None:
             raise last_error
         raise ArcfoxApiError("ARCFOX vehicle status request returned no usable payload")
@@ -513,6 +730,7 @@ class ArcfoxApiClient:
         payload_obj: ArcfoxCommandPayload | None = None,
     ) -> None:
         await self._ensure_authenticated()
+        await self._ensure_remote_control_token()
         vehicle_id = self._vehicle_identifier(vehicle)
         payload = {"vehicleId": vehicle_id, "command": command}
         if json:
@@ -538,6 +756,50 @@ class ArcfoxApiClient:
             "configure MQTT/BCTP instead of using the placeholder HTTP fallback"
         )
 
+    async def _ensure_remote_control_token(self) -> None:
+        """Validate the App security code before issuing a remote command.
+
+        ARCFOX returns a short-lived ``rcToken`` from this endpoint.  The
+        vehicle App requires it for door/window and other remote-control
+        operations; the normal account access token alone is insufficient.
+        """
+        # The App's security-code response is deliberately short-lived. Keep
+        # it briefly for a burst of controls, but never reuse it indefinitely.
+        if (
+            self._remote_control_token
+            and self._remote_control_token_at is not None
+            and time.monotonic() - self._remote_control_token_at < 240
+        ):
+            return
+        if not self._security_code:
+            raise ArcfoxAuthError(
+                "ARCFOX remote control requires the App security code"
+            )
+        if not self._is_b2c_access_token():
+            raise ArcfoxAuthError(
+                "ARCFOX security-code validation requires a current B2C access token"
+            )
+        data = await self._request_b2c(
+            "post",
+            "/vctrl/v2/security-code/check",
+            headers={"token_type": "user_token"},
+            json={"safeCode": self._security_code},
+        )
+        payload = data.get("data", data)
+        if isinstance(payload, str) and payload:
+            self._remote_control_token = payload
+        elif isinstance(payload, dict):
+            token = (
+                payload.get("rcToken")
+                or payload.get("remoteControlToken")
+                or payload.get("token")
+            )
+            if token:
+                self._remote_control_token = str(token)
+        if not self._remote_control_token:
+            raise ArcfoxAuthError("ARCFOX security-code response did not include rcToken")
+        self._remote_control_token_at = time.monotonic()
+
     async def _send_spec_command(
         self,
         vehicle: ArcfoxVehicle | str,
@@ -560,6 +822,51 @@ class ArcfoxApiClient:
         if self._access_token:
             return
         await self.async_authenticate()
+
+    async def _request_b2c(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+        """Call the B2C account API without SDK compatibility headers."""
+        self._last_request_path = path
+        headers = kwargs.pop("headers", {})
+        if self._access_token and "Authorization" not in headers:
+            headers = {
+                **headers,
+                "Authorization": self._access_token,
+                "token_type": "user_token",
+            }
+        try:
+            data = await self._transport.request_json(method, path, headers=headers, **kwargs)
+        except ArcfoxTransportAuthError as err:
+            self._last_error = str(err)
+            if self._refresh_token and not path.startswith("/auth/"):
+                _LOGGER.info(
+                    "ARCFOX B2C auth failure on %s %s, refreshing token and retrying once",
+                    method.upper(),
+                    path,
+                )
+                await self.async_refresh_access_token()
+                return await self._request_b2c(method, path, **kwargs)
+            raise ArcfoxAuthError(str(err)) from err
+        except ArcfoxTransportError as err:
+            self._last_error = str(err)
+            raise ArcfoxApiError(str(err)) from err
+
+        code = data.get("code")
+        if data.get("success") is False or (isinstance(code, int) and code not in {0, 200}):
+            message = data.get("message") or data.get("msg") or "unknown error"
+            self._last_error = f"ARCFOX B2C rejected request: {message}"
+            raise ArcfoxAuthError(self._last_error)
+        self._last_success_path = path
+        self._last_error = None
+        return data
+
+    def _store_account_id(self, data: dict[str, Any]) -> None:
+        """Resolve the B2C account identifier from an account response."""
+        payload = data.get("data") if isinstance(data.get("data"), dict) else data
+        if not isinstance(payload, dict):
+            return
+        account_id = payload.get("accountId") or payload.get("id")
+        if account_id is not None:
+            self._account_id = str(account_id)
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         headers = kwargs.pop("headers", {})
@@ -622,10 +929,11 @@ class ArcfoxApiClient:
             return {}
         token = self._access_token
         return {
-            "Authorization": f"Bearer {token}",
+            "Authorization": token,
             "accessToken": token,
             "token": token,
             "X-Access-Token": token,
+            "token_type": "user_token",
         }
 
     @staticmethod
@@ -686,6 +994,10 @@ class ArcfoxApiClient:
             raise ArcfoxAuthError("Missing access token in ARCFOX login response")
 
         self._access_token = str(token)
+        # A refreshed account token invalidates the previous remote-control
+        # token as well; it must be reissued with the security code.
+        self._remote_control_token = None
+        self._remote_control_token_at = None
         self._refresh_token = str(
             payload.get("refresh_token")
             or payload.get("refreshToken")

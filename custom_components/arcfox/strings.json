@@ -10,6 +10,7 @@
             "vin": "VIN (optional)",
             "access_token": "Access token (optional)",
             "refresh_token": "Refresh token (optional)",
+            "security_code": "App security code (for remote control)",
             "base_url": "API base URL",
             "region": "Region",
             "scan_interval": "Polling interval (minutes)",
@@ -40,7 +41,8 @@
         "data": {
           "base_url": "API base URL",
           "scan_interval": "Polling interval (minutes)",
-          "timeout": "Timeout (seconds)"
+          "timeout": "Timeout (seconds)",
+          "security_code": "App security code (for remote control)"
         }
       }
     }

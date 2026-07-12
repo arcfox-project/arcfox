@@ -28,10 +28,13 @@ from .const import (
 from .const import (
     CONF_BASE_URL,
     CONF_ACCESS_TOKEN,
+    CONF_APP_TOKEN,
     CONF_SCAN_INTERVAL,
     CONF_TIMEOUT,
     CONF_REGION,
+    CONF_PASSWORD,
     CONF_REFRESH_TOKEN,
+    CONF_SECURITY_CODE,
     CONF_USER_ID,
     CONF_VIN,
     DEFAULT_BASE_URL,
@@ -101,7 +104,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ArcfoxConfigEntry) -> bo
         region=config.get(CONF_REGION, DEFAULT_REGION),
         timeout=config.get(CONF_TIMEOUT, DEFAULT_TIMEOUT),
         access_token=config.get(CONF_ACCESS_TOKEN),
+        app_token=config.get(CONF_APP_TOKEN),
+        password=config.get(CONF_PASSWORD),
         refresh_token=config.get(CONF_REFRESH_TOKEN),
+        security_code=config.get(CONF_SECURITY_CODE),
     )
     client.set_auth_state_callback(lambda auth_state: hass.async_create_task(_persist_auth_state(auth_state)))
     if command_mode == COMMAND_TRANSPORT_MQTT:

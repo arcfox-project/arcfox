@@ -17,6 +17,7 @@ from .const import (
     COMMAND_TRANSPORT_MQTT,
     CONF_ACCOUNT_ID,
     CONF_ACCESS_TOKEN,
+    CONF_APP_TOKEN,
     CONF_BASE_URL,
     CONF_COMMAND_TRANSPORT,
     CONF_MQTT_CLIENT_ID,
@@ -25,7 +26,9 @@ from .const import (
     CONF_MQTT_PORT,
     CONF_MQTT_USE_TLS,
     CONF_MQTT_USERNAME,
+    CONF_PASSWORD,
     CONF_REFRESH_TOKEN,
+    CONF_SECURITY_CODE,
     CONF_REGION,
     CONF_SCAN_INTERVAL,
     CONF_SMS_CODE,
@@ -48,6 +51,9 @@ USER_STEP_SCHEMA = vol.Schema(
         vol.Optional(CONF_VIN): str,
         vol.Optional(CONF_ACCESS_TOKEN): str,
         vol.Optional(CONF_REFRESH_TOKEN): str,
+        vol.Optional(CONF_SECURITY_CODE): str,
+        vol.Optional(CONF_APP_TOKEN): str,
+        vol.Optional(CONF_PASSWORD): str,
         vol.Optional(CONF_BASE_URL, default=DEFAULT_BASE_URL): str,
         vol.Optional(CONF_REGION, default=DEFAULT_REGION): str,
         vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL_MINUTES): vol.All(
@@ -88,6 +94,7 @@ OPTIONS_SCHEMA = vol.Schema(
         vol.Optional(CONF_MQTT_PASSWORD): str,
         vol.Optional(CONF_MQTT_CLIENT_ID): str,
         vol.Optional(CONF_MQTT_USE_TLS): bool,
+        vol.Optional(CONF_SECURITY_CODE): str,
     }
 )
 
@@ -105,8 +112,11 @@ def _build_client(hass, data: dict[str, Any], sms_code: str | None = None) -> Ar
         region=data[CONF_REGION],
         timeout=data[CONF_TIMEOUT],
         access_token=data.get(CONF_ACCESS_TOKEN),
+        app_token=data.get(CONF_APP_TOKEN),
+        password=data.get(CONF_PASSWORD),
         sms_code=sms_code,
         refresh_token=data.get(CONF_REFRESH_TOKEN),
+        security_code=data.get(CONF_SECURITY_CODE),
         command_transport=None,
     )
 
@@ -123,14 +133,14 @@ async def _validate_input(
 ) -> tuple[str, str, str | None, str]:
     """Validate user input against the remote API."""
     client = _build_client(hass, data, sms_code=data[CONF_SMS_CODE])
-    if data.get(CONF_ACCESS_TOKEN) or data.get(CONF_REFRESH_TOKEN):
+    if data.get(CONF_ACCESS_TOKEN) or data.get(CONF_REFRESH_TOKEN) or data.get(CONF_PASSWORD):
         try:
-            await client.async_authenticate()
+            vehicles = await client.async_test_connection()
         except Exception:
             _LOGGER.exception("ARCFOX token validation failed")
             raise
         account_id = client.account_id or data[CONF_USER_ID].strip().lower()
-        title = data.get(CONF_VIN) or account_id
+        title = vehicles[0].name if vehicles else data.get(CONF_VIN) or account_id
         return account_id, title, client.access_token or None, client.refresh_token or ""
     try:
         vehicles = await client.async_test_connection()
@@ -158,7 +168,11 @@ class ArcfoxConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             try:
-                if user_input.get(CONF_ACCESS_TOKEN) or user_input.get(CONF_REFRESH_TOKEN):
+                if (
+                    user_input.get(CONF_ACCESS_TOKEN)
+                    or user_input.get(CONF_REFRESH_TOKEN)
+                    or user_input.get(CONF_PASSWORD)
+                ):
                     account_id, title, access_token, refresh_token = await _validate_input(
                         self.hass,
                         {**user_input, CONF_SMS_CODE: user_input.get(CONF_SMS_CODE, "")},
@@ -167,6 +181,10 @@ class ArcfoxConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     self._abort_if_unique_id_configured()
 
                     stored = dict(user_input)
+                    # Password and app token only bootstrap a B2C session; keep
+                    # the returned user/refresh tokens, not the credentials.
+                    stored.pop(CONF_PASSWORD, None)
+                    stored.pop(CONF_APP_TOKEN, None)
                     if not stored.get(CONF_VIN):
                         stored.pop(CONF_VIN, None)
                     stored[CONF_ACCOUNT_ID] = account_id
@@ -217,6 +235,8 @@ class ArcfoxConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
                     stored = dict(self._pending_user_input)
                     stored.pop(CONF_SMS_CODE, None)
+                    stored.pop(CONF_PASSWORD, None)
+                    stored.pop(CONF_APP_TOKEN, None)
                     stored[CONF_ACCOUNT_ID] = account_id
                     if not stored.get(CONF_VIN):
                         stored.pop(CONF_VIN, None)

@@ -4,12 +4,14 @@
     "step": {
         "user": {
           "title": "连接极狐车辆",
-          "description": "输入极狐账号信息。你可以导入已经登录的 app 会话（access token），也可以继续走短信验证码。VIN 可选。",
+          "description": "导入极狐 App 的 access token，或同时填写 App token 和账号密码完成 B2C 登录。VIN 可选；旧版 SDK 短信认证不再作为默认登录方式。",
           "data": {
             "user_id": "用户ID / 手机号",
             "vin": "车架号 VIN（可选）",
             "access_token": "Access token（可选）",
             "refresh_token": "Refresh token（可选）",
+            "app_token": "App token（密码登录时必填）",
+            "password": "极狐 App 密码（可选）",
             "base_url": "接口基础地址",
             "region": "区域",
             "scan_interval": "轮询间隔（分钟）",

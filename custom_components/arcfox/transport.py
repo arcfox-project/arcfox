@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 import logging
 import ssl
+import uuid
 from typing import Any
 from collections.abc import Iterable
 from pathlib import Path
@@ -96,11 +97,21 @@ class ArcfoxHttpTransport(ArcfoxTransport):
 
     @staticmethod
     def _build_bjev_ssl_context() -> ssl.SSLContext | None:
-        cert_path = Path(__file__).with_name("certs") / "baic_root_ca.pem"
-        if not cert_path.exists():
+        cert_dir = Path(__file__).with_name("certs")
+        ca_path = cert_dir / "baic_root_ca.pem"
+        client_cert_path = cert_dir / "baic_https_client.pem"
+        client_key_path = cert_dir / "baic_https_client_key.pem"
+        if not ca_path.exists():
             return None
         context = ssl.create_default_context()
-        context.load_verify_locations(cafile=str(cert_path))
+        context.load_verify_locations(cafile=str(ca_path))
+        if hasattr(ssl, "VERIFY_X509_STRICT"):
+            context.verify_flags &= ~ssl.VERIFY_X509_STRICT
+        if client_cert_path.exists() and client_key_path.exists():
+            context.load_cert_chain(
+                certfile=str(client_cert_path),
+                keyfile=str(client_key_path),
+            )
         return context
 
     def _ssl_for_url(self, url: str) -> ssl.SSLContext | None:
@@ -117,7 +128,16 @@ class ArcfoxHttpTransport(ArcfoxTransport):
         headers: dict[str, str] | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        request_headers = {"Accept": "application/json"}
+        # These headers are added by the official app's Retrofit interceptor
+        # for every request.  In particular, the B2C vehicle APIs are stricter
+        # than the legacy SDK endpoints and may reject otherwise valid tokens
+        # when the request fingerprint is incomplete.
+        request_headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json; charset=utf-8",
+            "X-Nonce": str(uuid.uuid4()),
+            "X-Client-Version": "3.4.28",
+        }
         if headers:
             request_headers.update(headers)
 
@@ -156,10 +176,14 @@ class ArcfoxHttpTransport(ArcfoxTransport):
                 last_error = ArcfoxTransportError(f"ARCFOX request failed: {err}")
                 continue
 
+            if isinstance(data, list):
+                # The B2C vehicle endpoint returns a bare array, while the
+                # legacy SDK consistently wraps results in an object.
+                return {"data": data}
             if not isinstance(data, dict):
-                _LOGGER.warning("ARCFOX HTTP response was not a JSON object for %s %s", method.upper(), url)
-                last_error = ArcfoxTransportError("ARCFOX API did not return a JSON object")
-                continue
+                # Several Retrofit methods, including security-code/check,
+                # are declared as Call<String> and return a JSON string.
+                return {"data": data}
             return data
 
         if auth_error is not None:
@@ -174,7 +198,7 @@ class ArcfoxBctpTransport(ArcfoxCommandTransport):
 
     def __init__(
         self,
-        publisher: Callable[[str, dict[str, Any]], Awaitable[None]],
+        publisher: Callable[[str, dict[str, Any] | bytes], Awaitable[None]],
         *,
         token_getter: Callable[[], str],
         topic_channel: str = "bctp",
@@ -222,5 +246,5 @@ class ArcfoxBctpTransport(ArcfoxCommandTransport):
             topic_suffix=self._topic_suffix,
         )
         _LOGGER.debug("ARCFOX BCTP publish request: %s", request.to_dict())
-        await self._publisher(request.topic, request.envelope.to_dict())
+        await self._publisher(request.topic, request.payload_bytes())
         return request

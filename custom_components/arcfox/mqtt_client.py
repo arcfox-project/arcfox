@@ -103,27 +103,34 @@ class ArcfoxMqttPublisher:
 
         self._connected = True
 
-    async def publish(self, topic: str, payload: dict[str, Any], *, qos: int = 0, retain: bool = False) -> None:
+    async def publish(self, topic: str, payload: dict[str, Any] | bytes, *, qos: int = 1, retain: bool = False) -> None:
         """Publish a JSON payload to a topic."""
-        if qos != 0:
-            raise ArcfoxMqttError("This publisher currently supports QoS 0 only")
+        if qos not in {0, 1}:
+            raise ArcfoxMqttError("This publisher supports QoS 0 and 1 only")
 
         await self.connect()
         if self._writer is None:
             raise ArcfoxMqttError("MQTT writer not available")
 
         packet = bytearray()
-        fixed_header = 0x30 | (0x01 if retain else 0x00)
+        fixed_header = 0x30 | (0x02 if qos == 1 else 0x00) | (0x01 if retain else 0x00)
         packet.append(fixed_header)
 
-        payload_bytes = _serialize_payload(payload)
+        payload_bytes = payload if isinstance(payload, bytes) else _serialize_payload(payload)
         variable_header = _encode_utf8_string(topic)
+        if qos == 1:
+            packet_id = secrets.randbelow(65535) + 1
+            variable_header += packet_id.to_bytes(2, "big")
         packet.extend(_encode_remaining_length(len(variable_header) + len(payload_bytes)))
         packet.extend(variable_header)
         packet.extend(payload_bytes)
 
         self._writer.write(packet)
         await self._writer.drain()
+        if qos == 1 and self._reader is not None:
+            ack = await asyncio.wait_for(self._reader.readexactly(4), timeout=10)
+            if ack[0] != 0x40 or ack[1] != 0x02:
+                raise ArcfoxMqttError(f"MQTT broker rejected publish: {ack!r}")
 
     async def close(self) -> None:
         """Close the broker connection."""

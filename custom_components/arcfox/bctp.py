@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
+import json
 from typing import Any
 
 from .models import ArcfoxVehicle
@@ -51,6 +53,58 @@ class BctpCommandEnvelope:
             envelope["businessCode"] = self.business_code
         return envelope
 
+    def to_inner_json(self) -> bytes:
+        """Encode the protobuf field-1 JSON payload used by the App."""
+        value = {
+            "header": self.header.to_dict(),
+            "body": self.payload,
+        }
+        if self.business_code is not None:
+            value["businessCode"] = self.business_code
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+    def to_protobuf(self) -> bytes:
+        """Encode ``ElectircVehiRmtCtrlControl.cmddown`` (field 1 string)."""
+        value = self.to_inner_json()
+        length = len(value)
+        prefix = bytearray([0x0A])
+        while length > 0x7F:
+            prefix.append((length & 0x7F) | 0x80)
+            length >>= 7
+        prefix.append(length)
+        return bytes(prefix) + value
+
+    def to_bctp_frame(self, vin: str) -> bytes:
+        """Build the binary BCTP frame used on MQTT topic/21."""
+        if len(vin.encode("ascii")) != 17:
+            raise ValueError("ARCFOX BCTP VIN must be exactly 17 ASCII bytes")
+        body = self.to_protobuf()
+        business_code = (self.business_code or "1000")[:4]
+        try:
+            type_bytes = bytes.fromhex(business_code)
+        except ValueError as err:
+            raise ValueError(f"Invalid BCTP business code: {business_code}") from err
+        if len(type_bytes) != 2:
+            raise ValueError("BCTP business code must encode exactly two bytes")
+        now = datetime.now()
+        date_bytes = bytearray(10)
+        date_bytes[0:2] = now.year.to_bytes(2, "big")
+        date_bytes[2:8] = bytes((now.month, now.day, now.hour, now.minute, now.second, 0))
+        date_bytes[8:10] = (now.microsecond // 1000).to_bytes(2, "big")
+        frame = bytearray()
+        frame.extend((0, 1))
+        frame.extend(vin.encode("ascii"))
+        frame.extend((3123).to_bytes(4, "big"))
+        frame.extend(type_bytes)
+        frame.append(0)
+        frame.extend(date_bytes)
+        frame.append(2)
+        frame.extend((self.header.seq & 0xFFFF).to_bytes(2, "big"))
+        frame.extend((1).to_bytes(2, "big"))
+        frame.extend(len(body).to_bytes(4, "big"))
+        frame.extend(body)
+        return bytes(frame)
+
 
 @dataclass(frozen=True, slots=True)
 class BctpPublishRequest:
@@ -60,6 +114,11 @@ class BctpPublishRequest:
     envelope: BctpCommandEnvelope
     qos: int = 0
     retain: bool = False
+    vin: str = ""
+
+    def payload_bytes(self) -> bytes:
+        """Return the actual MQTT payload, not the diagnostic JSON view."""
+        return self.envelope.to_bctp_frame(self.vin)
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serializable representation for logging or transport."""
@@ -168,6 +227,8 @@ def build_publish_request(
         default_channel=topic_channel,
         default_product=topic_product,
     )
+    if business_code is None and spec.cmd is not None:
+        business_code = f"10{spec.cmd:02d}"
     envelope = build_command_envelope(
         action=action,
         spec=spec,
@@ -187,4 +248,6 @@ def build_publish_request(
             suffix=topic_suffix,
         ),
         envelope=envelope,
+        qos=1,
+        vin=vin,
     )

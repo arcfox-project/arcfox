@@ -130,8 +130,22 @@ def build_cmd8_seat_payload(
 
 
 COMMAND_SPECS: dict[str, ArcfoxCommandSpec] = {
-    "lock": ArcfoxCommandSpec(action="lock", command="lock"),
-    "unlock": ArcfoxCommandSpec(action="unlock", command="unlock"),
+    "lock": ArcfoxCommandSpec(
+        action="lock",
+        command="lock",
+        group=7,
+        cmd=1,
+        builder=lambda enabled=True: build_cmd7_payload("door", enabled),
+        notes="cmd=7 door lock",
+    ),
+    "unlock": ArcfoxCommandSpec(
+        action="unlock",
+        command="unlock",
+        group=7,
+        cmd=1,
+        builder=lambda enabled=False: build_cmd7_payload("door", enabled),
+        notes="cmd=7 door unlock",
+    ),
     "climate_on": ArcfoxCommandSpec(
         action="climate_on",
         command="climate_on",
