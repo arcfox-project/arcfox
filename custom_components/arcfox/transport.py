@@ -6,6 +6,7 @@ import asyncio
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 import logging
+from datetime import datetime
 import ssl
 import uuid
 from typing import Any
@@ -15,7 +16,7 @@ from urllib.parse import urlsplit
 
 from aiohttp import ClientError, ClientResponseError, ClientSession
 
-from .bctp import BctpPublishRequest, build_publish_request
+from .bctp import BctpPublishRequest, _st_string, build_publish_request
 from .models import ArcfoxVehicle
 from .protocol import ArcfoxCommandPayload, ArcfoxCommandSpec
 
@@ -66,8 +67,9 @@ class ArcfoxCommandTransport(ABC):
         spec: ArcfoxCommandSpec,
         payload: ArcfoxCommandPayload | None,
         seq: int = 1,
-        st: int = 0,
+        st: str = "",
         business_code: str | None = None,
+        cyber: dict[str, Any] | None = None,
     ) -> Any:
         """Send a remote-control command."""
 
@@ -223,13 +225,16 @@ class ArcfoxBctpTransport(ArcfoxCommandTransport):
         spec: ArcfoxCommandSpec,
         payload: ArcfoxCommandPayload | None,
         seq: int = 1,
-        st: int = 0,
+        st: str = "",
         business_code: str | None = None,
+        cyber: dict[str, Any] | None = None,
     ) -> BctpPublishRequest:
         """Build and publish a BCTP command envelope."""
         token = self._token_getter()
         if not token:
             raise ArcfoxTransportError("Missing access token for BCTP command transport")
+        if not st:
+            st = _st_string(datetime.now())
         request = build_publish_request(
             vehicle,
             action=action,
@@ -239,6 +244,7 @@ class ArcfoxBctpTransport(ArcfoxCommandTransport):
             seq=seq,
             st=st,
             business_code=business_code,
+            cyber=cyber,
             topic_channel=self._topic_channel,
             topic_product=self._topic_product,
             topic_scope=self._topic_scope,

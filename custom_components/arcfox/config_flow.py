@@ -25,6 +25,9 @@ from .const import (
     CONF_MQTT_PASSWORD,
     CONF_MQTT_PORT,
     CONF_MQTT_USE_TLS,
+    CONF_MQTT_CERTFILE,
+    CONF_MQTT_KEYFILE,
+    CONF_MQTT_CAFILE,
     CONF_MQTT_USERNAME,
     CONF_PASSWORD,
     CONF_REFRESH_TOKEN,
@@ -71,6 +74,9 @@ USER_STEP_SCHEMA = vol.Schema(
         vol.Optional(CONF_MQTT_PASSWORD): str,
         vol.Optional(CONF_MQTT_CLIENT_ID): str,
         vol.Optional(CONF_MQTT_USE_TLS, default=False): bool,
+        vol.Optional(CONF_MQTT_CERTFILE): str,
+        vol.Optional(CONF_MQTT_KEYFILE): str,
+        vol.Optional(CONF_MQTT_CAFILE): str,
     }
 )
 
@@ -94,6 +100,9 @@ OPTIONS_SCHEMA = vol.Schema(
         vol.Optional(CONF_MQTT_PASSWORD): str,
         vol.Optional(CONF_MQTT_CLIENT_ID): str,
         vol.Optional(CONF_MQTT_USE_TLS): bool,
+        vol.Optional(CONF_MQTT_CERTFILE): str,
+        vol.Optional(CONF_MQTT_KEYFILE): str,
+        vol.Optional(CONF_MQTT_CAFILE): str,
         vol.Optional(CONF_SECURITY_CODE): str,
     }
 )

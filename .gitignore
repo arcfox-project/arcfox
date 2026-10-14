@@ -20,3 +20,17 @@ arcfox_*.json
 # Optional local client certificate material; never publish it.
 custom_components/arcfox/certs/baic_https_client.pem
 custom_components/arcfox/certs/baic_https_client_key.pem
+
+# Local reverse-engineering tooling and bytecode dumps.
+.jadx-*/
+.local-jadx/
+.local-jre/
+.mitmproxy/
+.mitmvenv/
+.tmp-jadx.zip
+.tmp-jre.tar.gz
+androguard.db
+backup.ab
+
+# Raw APK drops.
+*.apk

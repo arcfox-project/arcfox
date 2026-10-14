@@ -93,6 +93,32 @@ config/custom_components/arcfox
 
 远程控制还依赖官方 App 使用的客户端证书和完整业务 protobuf 编码，因此 MQTT/BCTP 当前不是开箱即用。真实授权材料、车辆标识、设备标识和证书不能写入源码、README、日志或公开仓库。
 
+## Android 缓存只读验证
+
+`scripts/arcfox_adb_status.py` 可以通过 ADB 读取官方 Android App 已经写入的
+Control SDK 日志，并输出脱敏后的车辆状态 JSON。它只执行目录读取和文件读取，
+不会启动 App、查询车辆或发送控制命令。
+
+```bash
+python3 scripts/arcfox_adb_status.py \
+  --adb /path/to/adb \
+  --serial YOUR_ADB_SERIAL
+```
+
+也可以离线解析之前复制的日志：
+
+```bash
+python3 scripts/arcfox_adb_status.py --file /path/to/control_sdk_log.text
+```
+
+目前可解析电池电量、续航、总里程、空调、充电、四门、后备厢、车窗和天窗状态。
+锁止状态暂时输出 `lock_state_code` 原始码，等待与官方 App 界面交叉验证后再转换为
+布尔值。输出中的 `observed_at` 是最近一次状态记录时间；该方式读取的是缓存，官方
+App 长时间未连接车辆时数据可能过期。
+
+脚本不会输出 VIN、设备标识、位置或令牌。使用完毕后建议关闭无线调试，并撤销不再
+使用的 ADB 主机授权。
+
 ## 开发入口
 
 主要代码位置：

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Minimal MQTT probe for ARCFOX brokers."""
+"""Minimal MQTT probe for ARCFOX brokers (mutual TLS aware)."""
 
 from __future__ import annotations
 
@@ -61,6 +61,11 @@ class ProbeConfig:
     topic: str
     timeout: int
     insecure: bool
+    certfile: str | None
+    keyfile: str | None
+    cafile: str | None
+    publish_topic: str | None
+    publish_payload_hex: str | None
 
 
 async def run_probe(config: ProbeConfig) -> int:
@@ -69,7 +74,9 @@ async def run_probe(config: ProbeConfig) -> int:
         if config.insecure:
             ssl_ctx = ssl._create_unverified_context()
         else:
-            ssl_ctx = ssl.create_default_context()
+            ssl_ctx = ssl.create_default_context(cafile=config.cafile)
+        if config.certfile and config.keyfile:
+            ssl_ctx.load_cert_chain(config.certfile, config.keyfile)
 
     reader, writer = await asyncio.open_connection(
         config.host,
@@ -105,6 +112,17 @@ async def run_probe(config: ProbeConfig) -> int:
             return 3
 
         packet_id = 1
+        if config.publish_topic:
+            pub_payload = bytes.fromhex(config.publish_payload_hex or "")
+            pub_variable = _encode_utf8(config.publish_topic) + b"\x00" + packet_id.to_bytes(2, "big")
+            publish = bytearray([0x31])
+            publish.extend(_encode_remaining_length(len(pub_variable) + len(pub_payload)))
+            publish.extend(pub_variable)
+            publish.extend(pub_payload)
+            writer.write(publish)
+            await writer.drain()
+            print(f"PUBLISH sent topic={config.publish_topic} bytes={len(pub_payload)}")
+
         sub_payload = _encode_utf8(config.topic) + b"\x00"
         sub_variable = packet_id.to_bytes(2, "big")
         subscribe = bytearray([0x82])
@@ -140,13 +158,15 @@ async def run_probe(config: ProbeConfig) -> int:
                     if qos:
                         pos += 2
                     body = payload_bytes[pos:]
-                    print(f"PUBLISH topic={topic} bytes={len(body)} hex={body[:64].hex()}")
+                    print(f"PUBLISH topic={topic} bytes={len(body)} hex={body[:128].hex()}")
                     try:
                         print(body.decode("utf-8"))
                     except UnicodeDecodeError:
                         pass
                 elif msg_type == 13:
                     print("PINGRESP")
+                elif msg_type == 4:
+                    print(f"PUBACK packet_id={payload_bytes.hex()}")
                 else:
                     print(f"packet type={msg_type} raw={payload_bytes.hex()}")
         except TimeoutError:
@@ -169,6 +189,11 @@ def parse_args() -> ProbeConfig:
     parser.add_argument("--topic", default="#")
     parser.add_argument("--timeout", type=int, default=25)
     parser.add_argument("--insecure", action="store_true")
+    parser.add_argument("--certfile", help="客户端证书 PEM（双向 TLS）")
+    parser.add_argument("--keyfile", help="客户端私钥 PEM（PKCS8）")
+    parser.add_argument("--cafile", help="服务端 CA 证书（可选）")
+    parser.add_argument("--publish-topic", help="发布指令的 topic")
+    parser.add_argument("--publish-payload-hex", help="发布负载（hex）")
     args = parser.parse_args()
     return ProbeConfig(
         host=args.host,
@@ -179,6 +204,11 @@ def parse_args() -> ProbeConfig:
         topic=args.topic,
         timeout=args.timeout,
         insecure=args.insecure,
+        certfile=args.certfile,
+        keyfile=args.keyfile,
+        cafile=args.cafile,
+        publish_topic=args.publish_topic,
+        publish_payload_hex=args.publish_payload_hex,
     )
 
 

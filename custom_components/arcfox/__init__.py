@@ -23,6 +23,9 @@ from .const import (
     CONF_MQTT_PASSWORD,
     CONF_MQTT_PORT,
     CONF_MQTT_USE_TLS,
+    CONF_MQTT_CERTFILE,
+    CONF_MQTT_KEYFILE,
+    CONF_MQTT_CAFILE,
     CONF_MQTT_USERNAME,
 )
 from .const import (
@@ -121,6 +124,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ArcfoxConfigEntry) -> bo
                     password=config.get(CONF_MQTT_PASSWORD),
                     client_id=config.get(CONF_MQTT_CLIENT_ID),
                     use_tls=bool(config.get(CONF_MQTT_USE_TLS, False)),
+                    certfile=config.get(CONF_MQTT_CERTFILE),
+                    keyfile=config.get(CONF_MQTT_KEYFILE),
+                    cafile=config.get(CONF_MQTT_CAFILE),
                 )
             )
             client.set_command_transport(

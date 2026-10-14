@@ -61,12 +61,18 @@ class ArcfoxCommandSpec:
 
 
 def build_cmd7_payload(control: str, enabled: bool) -> ArcfoxCommandPayload:
-    """Build the body-control payload for `cmd=7`."""
-    slot_name, _ = _CMD7_SLOTS[control]
+    """Build the body-control payload for the real ``group=10 / cmd=7`` cluster.
+
+    Decompiled ``BaicTelematicsSDK.sendCommand`` maps the body-control cluster to
+    ``group=10``, ``cmd=7``, where ``p2`` carries the action-slot mask and the
+    matching ``p3/p8/p9/p10/p11/p12`` field carries the two-state value.
+    """
+    slot_name, mask = _CMD7_SLOTS[control]
     return ArcfoxCommandPayload(
-        group=7,
-        cmd=1,
+        group=10,
+        cmd=7,
         c=1 if enabled else 2,
+        p2=mask,
         **{slot_name: 1 if enabled else 4},
     )
 
@@ -133,18 +139,18 @@ COMMAND_SPECS: dict[str, ArcfoxCommandSpec] = {
     "lock": ArcfoxCommandSpec(
         action="lock",
         command="lock",
-        group=7,
-        cmd=1,
+        group=10,
+        cmd=7,
         builder=lambda enabled=True: build_cmd7_payload("door", enabled),
-        notes="cmd=7 door lock",
+        notes="group=10 cmd=7 door lock",
     ),
     "unlock": ArcfoxCommandSpec(
         action="unlock",
         command="unlock",
-        group=7,
-        cmd=1,
+        group=10,
+        cmd=7,
         builder=lambda enabled=False: build_cmd7_payload("door", enabled),
-        notes="cmd=7 door unlock",
+        notes="group=10 cmd=7 door unlock",
     ),
     "climate_on": ArcfoxCommandSpec(
         action="climate_on",
@@ -258,48 +264,48 @@ COMMAND_SPECS: dict[str, ArcfoxCommandSpec] = {
     "window_open": ArcfoxCommandSpec(
         action="window_open",
         command="window_open",
-        group=7,
-        cmd=1,
+        group=10,
+        cmd=7,
         builder=lambda enabled: build_cmd7_payload("window", enabled),
-        notes="cmd=7 window",
+        notes="group=10 cmd=7 window",
     ),
     "window_close": ArcfoxCommandSpec(
         action="window_close",
         command="window_close",
-        group=7,
-        cmd=1,
+        group=10,
+        cmd=7,
         builder=lambda enabled: build_cmd7_payload("window", enabled),
-        notes="cmd=7 window",
+        notes="group=10 cmd=7 window",
     ),
     "sunroof_open": ArcfoxCommandSpec(
         action="sunroof_open",
         command="sunroof_open",
-        group=7,
-        cmd=1,
+        group=10,
+        cmd=7,
         builder=lambda enabled: build_cmd7_payload("sunroof", enabled),
         notes="cmd=7 sunroof",
     ),
     "sunroof_close": ArcfoxCommandSpec(
         action="sunroof_close",
         command="sunroof_close",
-        group=7,
-        cmd=1,
+        group=10,
+        cmd=7,
         builder=lambda enabled: build_cmd7_payload("sunroof", enabled),
         notes="cmd=7 sunroof",
     ),
     "trunk_open": ArcfoxCommandSpec(
         action="trunk_open",
         command="trunk_open",
-        group=7,
-        cmd=1,
+        group=10,
+        cmd=7,
         builder=lambda enabled: build_cmd7_payload("trunk", enabled),
         notes="cmd=7 trunk",
     ),
     "flash_honk": ArcfoxCommandSpec(
         action="flash_honk",
         command="flash_honk",
-        group=7,
-        cmd=1,
+        group=10,
+        cmd=7,
         builder=lambda enabled: build_cmd7_payload("flash_honk", enabled),
         notes="cmd=7 flash_honk",
     ),

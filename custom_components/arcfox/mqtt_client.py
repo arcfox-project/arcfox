@@ -16,7 +16,13 @@ class ArcfoxMqttError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class ArcfoxMqttConfig:
-    """Connection settings for a bare MQTT broker."""
+    """Connection settings for an ARCFOX MQTT broker.
+
+    The ARCFOX broker requires mutual TLS: besides ``username``/``password`` it
+    validates a client certificate issued at login time (``<userId>.crt`` /
+    ``<userId>.key``). ``cafile`` is the broker CA bundle; when omitted the
+    system trust store is used.
+    """
 
     host: str
     port: int = 1883
@@ -25,6 +31,10 @@ class ArcfoxMqttConfig:
     client_id: str | None = None
     keepalive: int = 60
     use_tls: bool = False
+    certfile: str | None = None
+    keyfile: str | None = None
+    keyfile_password: str | None = None
+    cafile: str | None = None
 
 
 def _encode_utf8_string(value: str) -> bytes:
@@ -62,7 +72,15 @@ class ArcfoxMqttPublisher:
         if self._connected and self._writer is not None and not self._writer.is_closing():
             return
 
-        ssl_context = ssl.create_default_context() if self._config.use_tls else None
+        ssl_context = None
+        if self._config.use_tls:
+            ssl_context = ssl.create_default_context(cafile=self._config.cafile)
+            if self._config.certfile:
+                ssl_context.load_cert_chain(
+                    self._config.certfile,
+                    self._config.keyfile,
+                    password=self._config.keyfile_password,
+                )
         self._reader, self._writer = await asyncio.open_connection(
             self._config.host,
             self._config.port,
