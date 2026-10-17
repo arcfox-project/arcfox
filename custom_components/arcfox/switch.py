@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
+import time
+from typing import Any, Callable
 
 from homeassistant.components.switch import SwitchEntity, SwitchEntityDescription
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_call_later
 
 from .entity import ArcfoxEntity
+
+_REFRESH_DELAY_SECONDS = 15
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -82,39 +86,81 @@ class ArcfoxCommandSwitch(ArcfoxEntity, SwitchEntity):
         super().__init__(coordinator, vehicle_id)
         self.entity_description = description
         self._attr_unique_id = f"{vehicle_id}_{description.key}"
+        self._optimistic_on: bool | None = None
+        self._optimistic_since = 0.0
+        self._command_in_flight = False
+        self._refresh_cancel: Any = None
 
     @property
     def is_on(self) -> bool | None:
+        if self._optimistic_on is not None:
+            return self._optimistic_on
         return self.entity_description.value_fn(self.vehicle)
 
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Keep the optimistic value until the vehicle has had time to react."""
+        if (
+            self._optimistic_on is not None
+            and time.monotonic() - self._optimistic_since < _REFRESH_DELAY_SECONDS
+        ):
+            super()._handle_coordinator_update()
+            return
+        self._optimistic_on = None
+        super()._handle_coordinator_update()
+
     async def async_turn_on(self, **kwargs) -> None:
-        client = self.coordinator.client
-        vehicle = self.vehicle
-        action = self.entity_description.action
-        if action == "climate":
-            await client.async_set_climate(vehicle, True)
-        elif action == "steering_wheel_heat":
-            await client.async_set_steering_wheel_heat(vehicle, True)
-        elif action == "front_defrost":
-            await client.async_set_front_defrost(vehicle, True)
-        elif action == "rear_defrost":
-            await client.async_set_rear_defrost(vehicle, True)
-        elif action == "seat_comfort_master":
-            await client.async_set_seat_comfort_master(vehicle, True)
-        await self.coordinator.async_request_refresh()
+        await self._set_on(True)
 
     async def async_turn_off(self, **kwargs) -> None:
+        await self._set_on(False)
+
+    async def _set_on(self, enabled: bool) -> None:
+        if self._command_in_flight:
+            return
+        self._command_in_flight = True
+        self._optimistic_on = enabled
+        self._optimistic_since = time.monotonic()
+        self.async_write_ha_state()
+        try:
+            await self._send_switch_command(enabled)
+        except Exception:
+            self._optimistic_on = None
+            self.async_write_ha_state()
+            raise
+        finally:
+            self._command_in_flight = False
+        self._schedule_refresh()
+
+    async def _send_switch_command(self, enabled: bool) -> None:
         client = self.coordinator.client
         vehicle = self.vehicle
         action = self.entity_description.action
         if action == "climate":
-            await client.async_set_climate(vehicle, False)
+            await client.async_set_climate(vehicle, enabled)
         elif action == "steering_wheel_heat":
-            await client.async_set_steering_wheel_heat(vehicle, False)
+            await client.async_set_steering_wheel_heat(vehicle, enabled)
         elif action == "front_defrost":
-            await client.async_set_front_defrost(vehicle, False)
+            await client.async_set_front_defrost(vehicle, enabled)
         elif action == "rear_defrost":
-            await client.async_set_rear_defrost(vehicle, False)
+            await client.async_set_rear_defrost(vehicle, enabled)
         elif action == "seat_comfort_master":
-            await client.async_set_seat_comfort_master(vehicle, False)
-        await self.coordinator.async_request_refresh()
+            await client.async_set_seat_comfort_master(vehicle, enabled)
+
+    def _schedule_refresh(self) -> None:
+        if self._refresh_cancel is not None:
+            self._refresh_cancel()
+        self._refresh_cancel = async_call_later(
+            self.hass, _REFRESH_DELAY_SECONDS, self._refresh_after_command
+        )
+
+    @callback
+    def _refresh_after_command(self, _now: Any = None) -> None:
+        self._refresh_cancel = None
+        self.coordinator.async_request_refresh()
+
+    async def async_will_remove_from_hass(self) -> None:
+        if self._refresh_cancel is not None:
+            self._refresh_cancel()
+            self._refresh_cancel = None
+        await super().async_will_remove_from_hass()

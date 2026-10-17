@@ -175,6 +175,17 @@ class ArcfoxVehicle:
     longitude: float | None = None
     inside_temp_c: float | None = None
     outside_temp_c: float | None = None
+    battery_temp_c: float | None = None
+    tire_pressure_fl_kpa: float | None = None
+    tire_pressure_fr_kpa: float | None = None
+    tire_pressure_rl_kpa: float | None = None
+    tire_pressure_rr_kpa: float | None = None
+    charge_state: str | None = None
+    charge_power_kw: float | None = None
+    charge_voltage_v: float | None = None
+    charge_energy_kwh: float | None = None
+    target_soc: float | None = None
+    is_online: bool | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -609,6 +620,57 @@ class ArcfoxVehicle:
                 or fallback_longitude
             ),
             raw=combined,
+        )
+
+    @classmethod
+    def from_iov_state(
+        cls,
+        state: dict[str, Any],
+        name: str | None = None,
+    ) -> "ArcfoxVehicle":
+        """Create a normalized vehicle object from an IOv full-state query."""
+        vin = str(state.get("vin") or "unknown")
+        vehicle_id = vin
+        battery_pct = _coerce_float(state.get("current_battery"))
+        range_km = _coerce_float(state.get("range_km"))
+        odometer_km = _coerce_float(state.get("total_mileage"))
+
+        inside_temp = _coerce_float(state.get("air_temperature"))
+        outside_temp = _coerce_float(state.get("drive_temperature"))
+        if outside_temp is None:
+            outside_temp = _coerce_float(state.get("battery_temperature"))
+
+        is_locked = state.get("is_locked")
+        if is_locked is None:
+            is_locked = _coerce_bool(state.get("lock_state"))
+
+        return cls(
+            vehicle_id=vehicle_id,
+            vin=vin,
+            name=name or vin,
+            battery_pct=battery_pct,
+            range_km=range_km,
+            odometer_km=odometer_km,
+            is_charging=state.get("is_charging"),
+            is_plugged_in=state.get("is_plugged_in"),
+            is_locked=is_locked,
+            climate_on=state.get("climate_on"),
+            latitude=_coerce_float(state.get("latitude")),
+            longitude=_coerce_float(state.get("longitude")),
+            inside_temp_c=inside_temp,
+            outside_temp_c=outside_temp,
+            battery_temp_c=_coerce_float(state.get("battery_temperature")),
+            tire_pressure_fl_kpa=_coerce_float(state.get("tire_left_front_pressure_kpa")),
+            tire_pressure_fr_kpa=_coerce_float(state.get("tire_right_front_pressure_kpa")),
+            tire_pressure_rl_kpa=_coerce_float(state.get("tire_left_rear_pressure_kpa")),
+            tire_pressure_rr_kpa=_coerce_float(state.get("tire_right_rear_pressure_kpa")),
+            charge_state=str(state.get("charge_state")) if state.get("charge_state") not in (None, "") else None,
+            charge_power_kw=_coerce_float(state.get("charge_power_kw")),
+            charge_voltage_v=_coerce_float(state.get("charge_voltage_v")),
+            charge_energy_kwh=_coerce_float(state.get("charge_energy_kwh")),
+            target_soc=_coerce_float(state.get("charge_end_soc")),
+            is_online=state.get("online"),
+            raw=state,
         )
 
     def seat_option(self, seat: str, mode: str | None = None) -> str | None:

@@ -36,6 +36,12 @@ BINARY_SENSORS: tuple[ArcfoxBinarySensorDescription, ...] = (
         value_fn=lambda vehicle: vehicle.is_plugged_in,
     ),
     ArcfoxBinarySensorDescription(
+        key="vehicle_online",
+        translation_key="vehicle_online",
+        device_class=BinarySensorDeviceClass.CONNECTIVITY,
+        value_fn=lambda vehicle: vehicle.is_online,
+    ),
+    ArcfoxBinarySensorDescription(
         key="server_data_ready",
         translation_key="server_data_ready",
         entity_category=None,

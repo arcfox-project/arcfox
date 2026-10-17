@@ -59,6 +59,7 @@ class ArcfoxEntity(CoordinatorEntity[ArcfoxDataUpdateCoordinator]):
             ATTR_VIN: vehicle.vin,
             ATTR_MODEL: vehicle.model,
             ATTR_BRAND: vehicle.brand,
+            "arcfox_state_wt": (vehicle.raw.get("raw") or {}).get("WT"),
             "battery_pct": vehicle.battery_pct,
             "range_km": vehicle.range_km,
             "odometer_km": vehicle.odometer_km,

@@ -6,22 +6,61 @@
 
 - UI 配置流
 - `DataUpdateCoordinator` 轮询架构
-- 车辆状态传感器
-- 车辆门锁实体
-- 空调、方向盘加热、除霜开关
-- 空调温度设定
-- 座椅加热/通风档位选择
+- 只读车联网（IOv）TCP 客户端，已完成握手和状态查询验证
+- 车辆状态、胎压、充电、温度传感器
 - 车辆定位实体
-- 唤醒、后备箱、车窗、天窗、闪灯鸣笛和刷新按钮
+- 车辆门锁、空调、方向盘加热、除霜、座椅等控制实体（占位，尚未接入真实控制链路）
 - 独立 transport 层
 - BCTP/MQTT envelope 和 topic 构造骨架
 - 原生 async MQTT publisher
 
 ## 当前状态
 
-Home Assistant 集成架构已经完成，当前重点是完善 ARCFOX App 使用的车辆状态和远程控制协议。
+只读车辆状态链路已经打通：集成使用官方 App 的 IOv 网关（`arcfoxapp-new-iov.bjev.com.cn:60115`）完成握手，并通过在线状态查询和完整状态查询读取电池、续航、总里程、胎压、位置、温度、门锁、充电等状态。
+
+远程控制链路（IOv/AppServer TCP）已完成握手验证，`appToken`/`imei`/`aid` 有效时可直接鉴权；真实下发指令尚未夜间实测。
 
 由于 ARCFOX 没有公开完整的车联网开发文档，接口和协议仍需要通过官方 App 的公开行为进行验证。仓库中的文档和代码不保存任何真实账户、车辆、设备或授权信息。
+
+## 令牌同步（推荐）
+
+实测结论：手机 App「半个月不用重新登录」并不是 mg 账号 token 被刷新，而是**车控通道根本不依赖它**。车辆读写走 IOv/AppServer TCP，鉴权凭据是手机 App 车控 SDK 的 `appToken`（32 位 hex，即 `control_sdk_log` 里的 `appToken:` 字段）+ `imei` + `aid` + `vin`；TSP REST 另用约一年有效的 `tspAccessToken`（JWT）。mg 账号的 `access_token` 只用于用户/商城等接口，与车辆状态无关。
+
+手机已登录 App 时，用一条命令把当前 `appToken` 同步到 HA：
+
+```bash
+python3 tools/arcfox_sync.py --serial <adb-serial> --apply \
+  --ha-host <ha-host> --ha-ssh-port 22222 --ha-user root \
+  --ha-password '<ssh-password>' --restart
+```
+
+脚本会读取手机 `/sdcard/Android/data/com.bjev.arcfox/files/control_sdk_log` 最新日志，
+提取 `appToken`/`imei`/`aid`/`vin`，先做 IOv 握手校验，再备份并写回 HA 的
+`core.config_entries`（更新 `remote_token`、`options.app_token`、`imei`），最后重启 HA。
+无需 root、无需验证码、无需密码登录。
+
+当 HA 再次出现 4402/鉴权失败时，通常只是手机 App 重新登录后 `appToken` 轮换了，
+重新跑一遍上面命令即可，即「刷新 token」。
+
+## 登录与令牌
+
+集成保留 B2C 账户域（`hbt-app-rsa.bjev.com.cn`）的登录/续期路径，供需要 mg 账号
+REST 数据时使用：
+
+- 配置流可输入「手机号 + 密码」或「手机号 + 短信验证码」完成登录，并把 `access_token` / `refresh_token` 写入配置。
+- `access_token` 过期时自动用 `refresh_token` 调 `/viam/v1/auth/token` 续期并重试请求。
+- 若 `refresh_token` 也失效且保存了密码，会回退到密码登录；密码登录要求图片验证码时会在配置流中提示输入。
+- 密码仅在本地 Home Assistant `.storage` 中保存，不会写入本仓库。
+
+## 只读状态查询 CLI
+
+仓库提供独立的只读查询脚本，用于在 Home Assistant 之外验证协议：
+
+```bash
+ACCESS_TOKEN='<app access token>' ARCFOX_VIN='<vin>'   ARCFOX_AID='<aid>' ARCFOX_IMEI='<15-digit imei>'   python3 scripts/arcfox_iov.py
+```
+
+该脚本只执行在线状态查询和完整状态查询，不会发送任何控制命令。
 
 ## 安装
 
@@ -47,9 +86,18 @@ config/custom_components/arcfox
   - 总里程
   - 车内温度
   - 车外温度
+  - 电池温度
+  - 四轮胎压
+  - 充电状态
+  - 充电功率
+  - 充电电压
+  - 充电电量
+  - 充电目标电量
 - `binary_sensor`
   - 充电中
   - 已插枪
+  - 车辆在线
+  - 服务端数据就绪
 - `lock`
   - 车辆门锁
 - `switch`
@@ -91,7 +139,20 @@ config/custom_components/arcfox
 
 ## 远程控制状态
 
-远程控制还依赖官方 App 使用的客户端证书和完整业务 protobuf 编码，因此 MQTT/BCTP 当前不是开箱即用。真实授权材料、车辆标识、设备标识和证书不能写入源码、README、日志或公开仓库。
+远程控制仍依赖尚未完全验证的控制链路，因此 `switch` / `lock` / `button` / `select` / `number` 控制实体当前不是开箱即用，也不会向车辆发送控制指令。真实授权材料、车辆标识、设备标识和证书不能写入源码、README、日志或公开仓库。
+
+只读状态走官方 App 的 IOv TCP 网关（`custom_components/arcfox/iov.py`），凭据通过配置流传入：
+- `access_token`：App 访问令牌
+- `remote_token`：手机端车控 SDK 的短时效令牌（32 位十六进制，即 App 日志里的
+  `appToken`）。配置后 IOv 只读通道直接使用它，不再通过 `access_token` 向
+  `mg.arcfox.cn` 换取；`access_token` 过期时仍可借此恢复只读状态。
+- `vin`：车辆识别码
+- `aid`：账户 aid（可选）
+- `imei`：15 位设备标识（可选）
+
+`remote_token` 可以从已登录手机的
+`/sdcard/Android/data/com.bjev.arcfox/files/control_sdk_log` 最新日志中提取
+（`appToken:` 字段），也可用 `scripts/arcfox_pull_account.py` 自动提取。
 
 ## Android 缓存只读验证
 
@@ -123,11 +184,12 @@ App 长时间未连接车辆时数据可能过期。
 
 主要代码位置：
 
-1. `custom_components/arcfox/api.py`
-2. `custom_components/arcfox/models.py`
-3. `custom_components/arcfox/protocol.py`
-4. `custom_components/arcfox/bctp.py`
-5. `custom_components/arcfox/transport.py`
+1. `custom_components/arcfox/iov.py`（只读 IOv TCP 协议与状态字段映射）
+2. `custom_components/arcfox/api.py`
+3. `custom_components/arcfox/models.py`
+4. `custom_components/arcfox/protocol.py`
+5. `custom_components/arcfox/bctp.py`
+6. `custom_components/arcfox/transport.py`
 
 协议未决事项记录在 [ARCFOX_协议问题记录.md](ARCFOX_协议问题记录.md)。
 

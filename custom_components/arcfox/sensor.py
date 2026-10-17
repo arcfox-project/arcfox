@@ -19,6 +19,17 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .entity import ArcfoxEntity
 
 
+def _charge_state_label(vehicle) -> str | None:
+    """Return a readable charge-state label derived from live signals."""
+    if vehicle.is_charging is True:
+        return "充电中"
+    if vehicle.is_plugged_in is True:
+        return "已插枪未充电"
+    if vehicle.is_plugged_in is False:
+        return "未插枪"
+    return None
+
+
 @dataclass(frozen=True, kw_only=True)
 class ArcfoxSensorDescription(SensorEntityDescription):
     value_fn: Callable = lambda vehicle: None
@@ -65,6 +76,93 @@ SENSORS: tuple[ArcfoxSensorDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda vehicle: vehicle.outside_temp_c,
+    ),
+    ArcfoxSensorDescription(
+        key="battery_temp_c",
+        translation_key="battery_temp_c",
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda vehicle: vehicle.battery_temp_c,
+    ),
+    ArcfoxSensorDescription(
+        key="tire_pressure_fl_kpa",
+        translation_key="tire_pressure_fl_kpa",
+        native_unit_of_measurement="kPa",
+        device_class=SensorDeviceClass.PRESSURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda vehicle: vehicle.tire_pressure_fl_kpa,
+    ),
+    ArcfoxSensorDescription(
+        key="tire_pressure_fr_kpa",
+        translation_key="tire_pressure_fr_kpa",
+        native_unit_of_measurement="kPa",
+        device_class=SensorDeviceClass.PRESSURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda vehicle: vehicle.tire_pressure_fr_kpa,
+    ),
+    ArcfoxSensorDescription(
+        key="tire_pressure_rl_kpa",
+        translation_key="tire_pressure_rl_kpa",
+        native_unit_of_measurement="kPa",
+        device_class=SensorDeviceClass.PRESSURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda vehicle: vehicle.tire_pressure_rl_kpa,
+    ),
+    ArcfoxSensorDescription(
+        key="tire_pressure_rr_kpa",
+        translation_key="tire_pressure_rr_kpa",
+        native_unit_of_measurement="kPa",
+        device_class=SensorDeviceClass.PRESSURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda vehicle: vehicle.tire_pressure_rr_kpa,
+    ),
+    ArcfoxSensorDescription(
+        key="charge_state",
+        translation_key="charge_state",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=_charge_state_label,
+    ),
+    ArcfoxSensorDescription(
+        key="charge_power_kw",
+        translation_key="charge_power_kw",
+        native_unit_of_measurement="kW",
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda vehicle: vehicle.charge_power_kw,
+    ),
+    ArcfoxSensorDescription(
+        key="charge_voltage_v",
+        translation_key="charge_voltage_v",
+        native_unit_of_measurement="V",
+        device_class=SensorDeviceClass.VOLTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda vehicle: vehicle.charge_voltage_v,
+    ),
+    ArcfoxSensorDescription(
+        key="charge_energy_kwh",
+        translation_key="charge_energy_kwh",
+        native_unit_of_measurement="kWh",
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda vehicle: vehicle.charge_energy_kwh,
+    ),
+    ArcfoxSensorDescription(
+        key="target_soc",
+        translation_key="target_soc",
+        native_unit_of_measurement=PERCENTAGE,
+        device_class=SensorDeviceClass.BATTERY,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda vehicle: vehicle.target_soc,
     ),
     ArcfoxSensorDescription(
         key="connection_source",

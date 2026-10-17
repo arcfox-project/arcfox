@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
+import json as _json
 import logging
 import time
 import uuid
+from dataclasses import dataclass
+from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlsplit
 
 from aiohttp import ClientSession
 
+from .const import B2C_OAUTH_CLIENT_ID, B2C_OAUTH_CLIENT_SECRET, B2C_OAUTH_SCOPES
+from .iov import ArcfoxIovClient, ArcfoxIovError, ArcfoxIovAuthError
 from .protocol import (
     ArcfoxCommandPayload,
     COMMAND_SPECS,
@@ -34,7 +40,96 @@ class ArcfoxAuthError(ArcfoxApiError):
     """Authentication error."""
 
 
+class ArcfoxCaptchaError(ArcfoxAuthError):
+    """Password login needs an additional image-captcha verification."""
+
+
 _LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class _RestControlSpec:
+    """Verified remote-control REST endpoint used by the current App.
+
+    Endpoints, headers and query parameters are transcribed from the
+    decompiled Retrofit interface ``com.huawei.business.remotecontrol.a.a.a``
+    and its callers in ``RemoteCtrlManagerImpl``.
+    """
+
+    endpoint: str
+    requires_rc: bool = True
+    params: dict[str, Any] | None = None
+    params_builder: Callable[..., dict[str, Any]] | None = None
+
+    def build_params(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        if self.params_builder is not None:
+            return self.params_builder(*args, **kwargs)
+        return dict(self.params or {})
+
+
+# Keyed by COMMAND_SPECS action name. ``rcToken`` is the short-lived token
+# returned by POST /vctrl/v2/security-code/check; commands that the App calls
+# without it keep ``requires_rc=False``.
+_REST_CONTROL_SPECS: dict[str, _RestControlSpec] = {
+    "lock": _RestControlSpec("/vctrl/v1/controls/doors", params={"open": "false"}),
+    "unlock": _RestControlSpec("/vctrl/v1/controls/doors", params={"open": "true"}),
+    "window_open": _RestControlSpec(
+        "/vctrl/v1/controls/windows", params={"open": "true", "openType": 10}
+    ),
+    "window_close": _RestControlSpec(
+        "/vctrl/v1/controls/windows", params={"open": "false"}
+    ),
+    "sunroof_open": _RestControlSpec(
+        "/vctrl/v1/controls/skylight", params={"open": "true", "range": 10}
+    ),
+    "sunroof_close": _RestControlSpec(
+        "/vctrl/v1/controls/skylight", params={"open": "false", "range": 10}
+    ),
+    "trunk_open": _RestControlSpec(
+        "/vctrl/v1/controls/elec-trunk", params={"open": "true"}
+    ),
+    "flash_honk": _RestControlSpec(
+        "/vctrl/v1/controls/flashing-honking", requires_rc=False, params={"type": 1}
+    ),
+    "climate_on": _RestControlSpec(
+        "/vctrl/v1/controls/air-conditioner",
+        params_builder=lambda enabled: {"enabled": "true", "targetTemp": 24},
+    ),
+    "climate_off": _RestControlSpec(
+        "/vctrl/v1/controls/air-conditioner",
+        params_builder=lambda enabled: {"enabled": "false"},
+    ),
+    "set_climate_temperature": _RestControlSpec(
+        "/vctrl/v1/controls/air-conditioner",
+        params_builder=lambda temperature: {
+            "enabled": "true",
+            "targetTemp": int(round(float(temperature))),
+        },
+    ),
+    "steering_wheel_heat_on": _RestControlSpec(
+        "/vctrl/v1/controls/steering-wheel/heat",
+        requires_rc=False,
+        params={"open": "true", "level": 1},
+    ),
+    "steering_wheel_heat_off": _RestControlSpec(
+        "/vctrl/v1/controls/steering-wheel/heat",
+        requires_rc=False,
+        params={"open": "false"},
+    ),
+    "front_defrost_on": _RestControlSpec(
+        "/vctrl/v1/controls/hvac", params={"enabled": "true", "pos": 1}
+    ),
+    "front_defrost_off": _RestControlSpec(
+        "/vctrl/v1/controls/hvac", params={"enabled": "false", "pos": 1}
+    ),
+    "rear_defrost_on": _RestControlSpec(
+        "/vctrl/v1/controls/hvac", params={"enabled": "true", "pos": 2}
+    ),
+    "rear_defrost_off": _RestControlSpec(
+        "/vctrl/v1/controls/hvac", params={"enabled": "false", "pos": 2}
+    ),
+}
+
 
 CAR_STATUS_QUERY_KEYS = (
     "gps,kmTotal,limitedDriving,current,chargingleft,soc,insideTemperature,"
@@ -157,10 +252,6 @@ def _build_base_url_candidates(base_url: str) -> list[str]:
             "https://napi.arcfox.cn/api",
             "https://mg.arcfox.cn",
             "https://mg.arcfox.cn/api",
-            "https://arcfoxapp-new-iov.bjev.com.cn",
-            "https://arcfoxapp-new-iov.bjev.com.cn/api",
-            "https://hbt-app-rsa-pre.bjev.com.cn",
-            "https://hbt-app-rsa-pre.bjev.com.cn/api",
             host_root,
             host_api,
         ):
@@ -189,22 +280,37 @@ class ArcfoxApiClient:
         timeout: int,
         access_token: str | None = None,
         app_token: str | None = None,
+        remote_token: str | None = None,
         password: str | None = None,
         sms_code: str | None = None,
+        captcha_code: str | None = None,
         refresh_token: str | None = None,
         security_code: str | None = None,
         command_transport: ArcfoxCommandTransport | None = None,
         auth_state_callback: Any | None = None,
+        aid: str | None = None,
+        imei: str | None = None,
+        iov_host: str = "arcfoxapp-new-iov.bjev.com.cn",
+        iov_port: int = 60115,
     ) -> None:
         self._user_id = user_id
         self._vin = vin
+        self._timeout = timeout
+        self._aid = aid or ""
+        self._imei = imei or ""
+        self._iov_host = iov_host
+        self._iov_port = iov_port
         self._region = region
         self._sms_code = sms_code
+        self._captcha_code = captcha_code
         self._access_token: str | None = access_token or None
         self._app_token: str | None = app_token or None
+        self._remote_token: str | None = (remote_token or "").strip() or None
         self._password: str | None = password or None
         self._refresh_token: str | None = refresh_token
         self._security_code: str | None = security_code or None
+        self._oauth_app_token: str | None = None
+        self._oauth_app_token_at: float | None = None
         self._remote_control_token: str | None = None
         self._remote_control_token_at: float | None = None
         self._account_id: str | None = None
@@ -224,6 +330,33 @@ class ArcfoxApiClient:
     def account_id(self) -> str | None:
         """Return the resolved remote account ID."""
         return self._account_id
+
+    async def async_get_iov_vehicle(self) -> ArcfoxVehicle | None:
+        """Fetch vehicle state through the read-only IOv TCP gateway."""
+        if not self._access_token or not self._vin:
+            return None
+
+        def _sync_query() -> ArcfoxVehicle:
+            client = ArcfoxIovClient(
+                vin=self._vin,
+                access_token=self._access_token or "",
+                aid=self._aid,
+                imei=self._imei,
+                remote_token=self._remote_token or "",
+                host=self._iov_host,
+                port=self._iov_port,
+                timeout=self._timeout,
+            )
+            try:
+                client.connect()
+                online = client.query_online()
+                state = client.query_full_state()
+                state["online"] = online
+                return ArcfoxVehicle.from_iov_state(state)
+            finally:
+                client.close()
+
+        return await asyncio.to_thread(_sync_query)
 
     @property
     def access_token(self) -> str | None:
@@ -259,55 +392,103 @@ class ArcfoxApiClient:
         self._auth_state_callback = callback
 
     async def async_authenticate(self) -> str:
-        """Authenticate and store the bearer token."""
+        """Authenticate and store the bearer token.
+
+        Resolution order is: existing token, password login (B2C), refresh
+        token, and finally SMS login.  When a refresh token is available it is
+        preferred over interactive credentials because it never needs a
+        captcha.
+        """
         if self._access_token:
             return self._account_id or self._vin
 
-        if self._password:
+        if self._password and not self._refresh_token:
             return await self._async_b2c_password_login()
 
-        if self._refresh_token and not self._sms_code:
+        if self._refresh_token:
             _LOGGER.debug(
                 "ARCFOX authenticating with refresh token for vin=%s user_id=%s",
                 self._vin,
                 self._user_id,
             )
-            return await self.async_refresh_access_token()
+            try:
+                return await self.async_refresh_access_token()
+            except ArcfoxApiError:
+                if not self._password:
+                    raise
+                _LOGGER.warning(
+                    "ARCFOX refresh token failed for vin=%s; falling back to password login",
+                    self._vin,
+                )
+
+        if self._password:
+            return await self._async_b2c_password_login()
 
         if not self._sms_code:
-            raise ArcfoxAuthError("Missing SMS code for ARCFOX login")
+            raise ArcfoxAuthError("Missing password, refresh token or SMS code for ARCFOX login")
 
         _LOGGER.debug(
-            "ARCFOX authenticating with vin=%s user_id=%s region=%s",
+            "ARCFOX authenticating with SMS code for vin=%s user_id=%s region=%s",
             self._vin,
             self._user_id,
             self._region,
         )
-        payload = {
-            "userId": self._user_id,
-            "smsCode": self._sms_code,
-        }
-        if self._vin:
-            payload["vin"] = self._vin
-        data = await self._request("post", "/auth/signin", json=payload)
-        self._store_auth_data(data)
-        return self._account_id or self._vin
+        return await self._async_b2c_sms_login(self._user_id, self._sms_code)
+
+    async def _async_oauth_app_token(self) -> str:
+        """Return a cached OAuth application token, refreshing when needed.
+
+        The mobile app obtains this token with the public client-credentials
+        grant embedded in its BuildConfig before calling any account endpoint.
+        """
+        now = time.monotonic()
+        if self._oauth_app_token and self._oauth_app_token_at is not None:
+            # ``expiresAt`` from the service is an absolute Unix timestamp.  We
+            # keep the monotonic deadline instead so wall-clock changes do not
+            # affect token reuse.
+            if now < self._oauth_app_token_at:
+                return self._oauth_app_token
+
+        _LOGGER.debug("ARCFOX fetching B2C application token")
+        data = await self._transport.request_json(
+            "post",
+            "/viam/v1/auth/apptoken",
+            json={
+                "clientId": B2C_OAUTH_CLIENT_ID,
+                "clientSecret": B2C_OAUTH_CLIENT_SECRET,
+                "grantType": "client_credentials",
+                "scopes": list(B2C_OAUTH_SCOPES),
+            },
+        )
+        token = (
+            data.get("accessToken")
+            or data.get("access_token")
+            or data.get("token")
+        )
+        if not token:
+            raise ArcfoxAuthError("ARCFOX B2C app token response missing access token")
+        expires_at = data.get("expiresAt") or data.get("expires_at")
+        self._oauth_app_token = str(token)
+        # Refresh 60 seconds before expiry; fall back to a 10 minute TTL when
+        # the service does not report an absolute expiry.
+        ttl = 600
+        if isinstance(expires_at, int) and expires_at > 0:
+            ttl = max(60, min(int(expires_at) - int(time.time()) - 60, 3600))
+        self._oauth_app_token_at = now + ttl
+        return self._oauth_app_token
 
     async def _async_b2c_password_login(self) -> str:
         """Log in through the current ARCFOX B2C account service.
 
-        The mobile app obtains an application token before its account login. It
-        is intentionally supplied by the user rather than embedded here because
-        application credentials are private and may be rotated by ARCFOX.
+        The application token is obtained automatically from the public OAuth
+        client credentials shipped with the App.  ``captcha_code`` is supplied
+        only when the service asks for an image-captcha verification.
         """
-        if not self._app_token:
-            raise ArcfoxAuthError(
-                "Password login requires a current ARCFOX App token; import an App access token instead"
-            )
+        app_token = await self._async_oauth_app_token()
         payload = {
             "method": "password",
             "device": {
-                "id": str(uuid.uuid4()),
+                "id": self._device_id(),
                 "model": "Home Assistant ARCFOX",
                 "type": 1,
             },
@@ -316,32 +497,77 @@ class ArcfoxApiClient:
                 "password": self._password,
             },
         }
+        if self._captcha_code:
+            payload["passwordCredential"]["code"] = self._captcha_code
         data = await self._request_b2c(
             "post",
             "/vcam/v1/auth/accounts/login",
-            headers={"Authorization": self._app_token, "token_type": "app_token"},
+            headers={"Authorization": app_token, "token_type": "app_token"},
             json=payload,
+            check_code=False,
         )
+        token = data.get("accessToken") or data.get("access_token") or data.get("token")
+        if not token:
+            code = data.get("code")
+            message = data.get("msg") or data.get("message") or "unknown error"
+            if code == 110641:
+                raise ArcfoxCaptchaError("ARCFOX password login requires an image captcha")
+            raise ArcfoxAuthError(f"ARCFOX password login rejected: {message} (code={code})")
         self._store_auth_data(data)
         return self._account_id or self._user_id
 
-    async def async_request_sms_code(self) -> None:
-        """Request an SMS verification code for login."""
-        _LOGGER.debug(
-            "ARCFOX requesting SMS code for vin=%s user_id=%s",
-            self._vin,
-            self._user_id,
-        )
+    async def _async_b2c_sms_login(self, phone: str, sms_code: str) -> str:
+        """Log in with a phone number and SMS verification code (B2C)."""
+        app_token = await self._async_oauth_app_token()
         payload = {
-            "userId": self._user_id,
+            "method": "verifycode",
+            "device": {
+                "id": self._device_id(),
+                "model": "Home Assistant ARCFOX",
+                "type": 1,
+            },
+            "verifyCodeCredential": {
+                "phone": phone,
+                "code": sms_code,
+            },
         }
-        if self._vin:
-            payload["vin"] = self._vin
-        data = await self._request("post", "/auth/signinsms", json=payload)
+        data = await self._request_b2c(
+            "post",
+            "/vcam/v1/auth/accounts/login",
+            headers={"Authorization": app_token, "token_type": "app_token"},
+            json=payload,
+            check_code=False,
+        )
+        token = data.get("accessToken") or data.get("access_token") or data.get("token")
+        if not token:
+            code = data.get("code")
+            message = data.get("msg") or data.get("message") or "unknown error"
+            raise ArcfoxAuthError(f"ARCFOX SMS login rejected: {message} (code={code})")
+        self._store_auth_data(data)
+        return self._account_id or self._user_id
+
+    async def async_request_sms_code(self, phone: str | None = None) -> None:
+        """Request a B2C login SMS verification code."""
+        app_token = await self._async_oauth_app_token()
+        payload = {
+            "phone": phone or self._user_id,
+            "operType": 3,
+        }
+        data = await self._request_b2c(
+            "post",
+            "/viam/v1/auth/verifycode",
+            headers={"Authorization": app_token, "token_type": "app_token"},
+            json=payload,
+        )
         self._auth_data = data
 
     async def async_refresh_access_token(self) -> str:
-        """Refresh the current access token using the stored refresh token."""
+        """Refresh the B2C access token using the stored refresh token.
+
+        The modern App refreshes through ``/viam/v1/auth/token`` with the
+        application token in the ``Authorization`` header and a
+        ``grantType=refresh_token`` body.
+        """
         if not self._refresh_token:
             raise ArcfoxAuthError("Missing refresh token for ARCFOX login")
 
@@ -350,14 +576,23 @@ class ArcfoxApiClient:
             self._vin,
             self._user_id,
         )
-        payload = {
-            "refreshToken": self._refresh_token,
-        }
-        if self._vin:
-            payload["vin"] = self._vin
-        data = await self._request("post", "/auth/refreshtoken", json=payload)
+        app_token = await self._async_oauth_app_token()
+        data = await self._request_b2c(
+            "post",
+            "/viam/v1/auth/token",
+            headers={"Authorization": app_token, "token_type": "app_token"},
+            json={
+                "grantType": "refresh_token",
+                "refreshToken": self._refresh_token,
+            },
+        )
         self._store_auth_data(data)
         return self._account_id or self._vin
+
+    def _device_id(self) -> str:
+        """Return a stable device id for B2C login device records."""
+        key = self._imei or self._aid or self._vin or self._user_id
+        return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"home-assistant-arcfox:{key}"))
 
     async def async_test_connection(self) -> list[ArcfoxVehicle]:
         """Validate credentials and return available vehicles."""
@@ -367,6 +602,16 @@ class ArcfoxApiClient:
     async def async_get_vehicles(self) -> list[ArcfoxVehicle]:
         """Fetch all vehicles associated with the account."""
         await self._ensure_authenticated()
+        if self._vin and self._access_token:
+            try:
+                vehicle = await self.async_get_iov_vehicle()
+                if vehicle is not None:
+                    vehicle.raw["arcfox_connection_source"] = "iov_tcp"
+                    return [vehicle]
+            except ArcfoxIovAuthError as err:
+                _LOGGER.warning("ARCFOX IOv auth failed, falling back to HTTP: %s", err)
+            except ArcfoxIovError as err:
+                _LOGGER.warning("ARCFOX IOv query failed, falling back to HTTP: %s", err)
         if self._password or self._is_b2c_access_token():
             return await self._async_get_b2c_vehicles()
         vehicle_items: list[dict[str, Any]] = []
@@ -375,14 +620,21 @@ class ArcfoxApiClient:
             payload: dict[str, Any] = {"vin": self._vin, "vehicleId": self._vin}
             config_payload = None
             status = None
+            config_auth_failed = False
             try:
                 config_payload = await self._request("get", f"/tsp/car/vehicleConfig/{self._vin}")
+            except ArcfoxAuthError:
+                config_auth_failed = True
+                config_payload = None
             except ArcfoxApiError:
                 config_payload = None
-            try:
-                status = await self.async_get_vehicle_status(self._vin)
-            except ArcfoxApiError:
+            if config_auth_failed:
                 status = None
+            else:
+                try:
+                    status = await self.async_get_vehicle_status(self._vin)
+                except ArcfoxApiError:
+                    status = None
             if isinstance(config_payload, dict):
                 payload = {**payload, **config_payload}
             if config_payload is not None or status is not None:
@@ -728,17 +980,30 @@ class ArcfoxApiClient:
         *,
         json: dict[str, Any] | None = None,
         payload_obj: ArcfoxCommandPayload | None = None,
+        rest_args: tuple[Any, ...] = (),
+        rest_kwargs: dict[str, Any] | None = None,
     ) -> None:
         await self._ensure_authenticated()
-        await self._ensure_remote_control_token()
         vehicle_id = self._vehicle_identifier(vehicle)
-        payload = {"vehicleId": vehicle_id, "command": command}
-        if json:
-            payload.update(json)
         spec = self._spec_for_command(command)
-        if self._command_transport is not None and (
-            payload_obj is not None or spec.group is not None or spec.cmd is not None
-        ):
+
+        if self._command_transport is None:
+            rest_spec = _REST_CONTROL_SPECS.get(command)
+            if rest_spec is None:
+                raise ArcfoxTransportError(
+                    f"ARCFOX action {spec.action} is not supported over the HTTP "
+                    "control channel; configure MQTT/BCTP for it"
+                )
+            await self._send_rest_command(
+                vehicle_id,
+                command,
+                rest_spec,
+                rest_args,
+                rest_kwargs or {},
+            )
+            return
+
+        if payload_obj is not None or spec.group is not None or spec.cmd is not None:
             _LOGGER.debug(
                 "ARCFOX command transport selected for %s (vehicle=%s)",
                 spec.action,
@@ -752,9 +1017,62 @@ class ArcfoxApiClient:
             )
             return
         raise ArcfoxTransportError(
-            f"Command transport is not configured for ARCFOX action {spec.action}; "
-            "configure MQTT/BCTP instead of using the placeholder HTTP fallback"
+            f"ARCFOX action {spec.action} has no payload for the command transport"
         )
+
+    async def _send_rest_command(
+        self,
+        vehicle_id: str,
+        command: str,
+        rest_spec: _RestControlSpec,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+    ) -> None:
+        """Send a remote-control command through the B2C REST API.
+
+        This mirrors the non-protect fallback path in the App's
+        ``RemoteCtrlManagerImpl``: a short-lived ``rcToken`` is obtained from
+        the security-code check and sent in the ``rcToken`` request header.
+        """
+        if rest_spec.requires_rc:
+            await self._ensure_remote_control_token()
+        headers: dict[str, str] = {
+            "X-Vehicle-Id": str(vehicle_id),
+            "token_type": "user_token",
+        }
+        if rest_spec.requires_rc and self._remote_control_token:
+            headers["rcToken"] = self._remote_control_token
+        params = rest_spec.build_params(*args, **kwargs)
+        _LOGGER.debug(
+            "ARCFOX REST control: %s %s vehicle=%s params=%s",
+            "POST",
+            rest_spec.endpoint,
+            vehicle_id,
+            params,
+        )
+        data = await self._request_b2c(
+            "post",
+            rest_spec.endpoint,
+            headers=headers,
+            params=params,
+            check_code=False,
+        )
+        payload = data.get("data", data)
+        if isinstance(payload, str):
+            try:
+                payload = _json.loads(payload)
+            except ValueError:
+                payload = {"commandResponse": payload}
+        if isinstance(payload, dict):
+            command_id = payload.get("commandId") or payload.get("command_id")
+            if command_id:
+                _LOGGER.debug(
+                    "ARCFOX REST control %s accepted: commandId=%s",
+                    command,
+                    command_id,
+                )
+        else:
+            _LOGGER.debug("ARCFOX REST control %s response: %r", command, payload)
 
     async def _ensure_remote_control_token(self) -> None:
         """Validate the App security code before issuing a remote command.
@@ -786,8 +1104,8 @@ class ArcfoxApiClient:
             json={"safeCode": self._security_code},
         )
         payload = data.get("data", data)
-        if isinstance(payload, str) and payload:
-            self._remote_control_token = payload
+        if isinstance(payload, str) and payload and payload.strip():
+            self._remote_control_token = payload.strip()
         elif isinstance(payload, dict):
             token = (
                 payload.get("rcToken")
@@ -796,6 +1114,11 @@ class ArcfoxApiClient:
             )
             if token:
                 self._remote_control_token = str(token)
+            elif payload.get("success") is False or payload.get("code") not in (None, 0, 200):
+                raise ArcfoxAuthError(
+                    "ARCFOX rejected the security code: "
+                    + str(payload.get("message") or payload.get("msg") or payload)
+                )
         if not self._remote_control_token:
             raise ArcfoxAuthError("ARCFOX security-code response did not include rcToken")
         self._remote_control_token_at = time.monotonic()
@@ -816,6 +1139,8 @@ class ArcfoxApiClient:
             spec.command,
             json=payload.to_dict() if payload is not None else None,
             payload_obj=payload,
+            rest_args=builder_args,
+            rest_kwargs=builder_kwargs,
         )
 
     async def _ensure_authenticated(self) -> None:
@@ -823,38 +1148,69 @@ class ArcfoxApiClient:
             return
         await self.async_authenticate()
 
-    async def _request_b2c(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
-        """Call the B2C account API without SDK compatibility headers."""
+    async def _async_reauthenticate(self) -> None:
+        """Drop a rejected token and obtain a fresh one."""
+        self._access_token = None
+        self._remote_control_token = None
+        self._remote_control_token_at = None
+        await self.async_authenticate()
+
+    async def _request_b2c(
+        self,
+        method: str,
+        path: str,
+        *,
+        check_code: bool = True,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Call the B2C account API without SDK compatibility headers.
+
+        ``check_code`` disables the account-envelope business-code check for
+        remote-control endpoints, whose responses use AppServer result codes
+        (e.g. 10005) rather than the account API's 0/200 envelope.
+        """
         self._last_request_path = path
-        headers = kwargs.pop("headers", {})
+        headers = dict(kwargs.pop("headers", {}) or {})
         if self._access_token and "Authorization" not in headers:
-            headers = {
-                **headers,
-                "Authorization": self._access_token,
-                "token_type": "user_token",
-            }
+            headers["Authorization"] = self._access_token
+        headers.setdefault("token_type", "user_token")
         try:
             data = await self._transport.request_json(method, path, headers=headers, **kwargs)
         except ArcfoxTransportAuthError as err:
             self._last_error = str(err)
-            if self._refresh_token and not path.startswith("/auth/"):
-                _LOGGER.info(
-                    "ARCFOX B2C auth failure on %s %s, refreshing token and retrying once",
-                    method.upper(),
-                    path,
-                )
-                await self.async_refresh_access_token()
-                return await self._request_b2c(method, path, **kwargs)
-            raise ArcfoxAuthError(str(err)) from err
+            if path.startswith("/auth/"):
+                raise ArcfoxAuthError(str(err)) from err
+            _LOGGER.info(
+                "ARCFOX B2C auth failure on %s %s, re-authenticating and retrying once",
+                method.upper(),
+                path,
+            )
+            try:
+                await self._async_reauthenticate()
+            except ArcfoxApiError as reauth_err:
+                raise ArcfoxAuthError(str(err)) from reauth_err
+            # Drop the stale Authorization header so the retried request picks
+            # up the freshly issued token in _request_b2c.
+            headers.pop("Authorization", None)
+            return await self._request_b2c(
+                method,
+                path,
+                check_code=check_code,
+                headers=headers,
+                **kwargs,
+            )
         except ArcfoxTransportError as err:
             self._last_error = str(err)
             raise ArcfoxApiError(str(err)) from err
 
-        code = data.get("code")
-        if data.get("success") is False or (isinstance(code, int) and code not in {0, 200}):
-            message = data.get("message") or data.get("msg") or "unknown error"
-            self._last_error = f"ARCFOX B2C rejected request: {message}"
-            raise ArcfoxAuthError(self._last_error)
+        if check_code:
+            code = data.get("code")
+            if data.get("success") is False or (
+                isinstance(code, int) and code not in {0, 200}
+            ):
+                message = data.get("message") or data.get("msg") or "unknown error"
+                self._last_error = f"ARCFOX B2C rejected request: {message}"
+                raise ArcfoxAuthError(self._last_error)
         self._last_success_path = path
         self._last_error = None
         return data
@@ -885,16 +1241,19 @@ class ArcfoxApiClient:
             self._last_error = None
         except ArcfoxTransportAuthError as err:
             self._last_error = str(err)
-            if self._refresh_token and not path.startswith("/auth/"):
-                _LOGGER.info(
-                    "ARCFOX API auth failure on %s %s, refreshing token and retrying once",
-                    method.upper(),
-                    path,
-                )
-                await self.async_refresh_access_token()
-                return await self._request(method, path, **kwargs)
-            _LOGGER.warning("ARCFOX API auth failure on %s %s: %s", method.upper(), path, err)
-            raise ArcfoxAuthError(str(err)) from err
+            if path.startswith("/auth/"):
+                _LOGGER.warning("ARCFOX API auth failure on %s %s: %s", method.upper(), path, err)
+                raise ArcfoxAuthError(str(err)) from err
+            _LOGGER.info(
+                "ARCFOX API auth failure on %s %s, re-authenticating and retrying once",
+                method.upper(),
+                path,
+            )
+            try:
+                await self._async_reauthenticate()
+            except ArcfoxApiError as reauth_err:
+                raise ArcfoxAuthError(str(err)) from reauth_err
+            return await self._request(method, path, **kwargs)
         except ArcfoxTransportError as err:
             self._last_error = str(err)
             _LOGGER.warning("ARCFOX API failure on %s %s: %s", method.upper(), path, err)

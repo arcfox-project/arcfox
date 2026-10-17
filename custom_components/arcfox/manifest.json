@@ -5,6 +5,8 @@
   "config_flow": true,
   "integration_type": "device",
   "iot_class": "cloud_polling",
-  "requirements": [],
+  "requirements": [
+    "cryptography"
+  ],
   "codeowners": []
 }

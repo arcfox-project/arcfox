@@ -44,6 +44,7 @@ class ArcfoxDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ArcfoxVehicle]
         )
 
     async def _async_update_data(self) -> dict[str, ArcfoxVehicle]:
+        _LOGGER.warning("ARCFOX coordinator refresh start entry=%s", self.config_entry.entry_id)
         try:
             vehicles = await self.client.async_get_vehicles()
         except ArcfoxAuthError as err:
@@ -51,4 +52,6 @@ class ArcfoxDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ArcfoxVehicle]
         except ArcfoxApiError as err:
             raise UpdateFailed(str(err)) from err
 
-        return {vehicle.vehicle_id: vehicle for vehicle in vehicles}
+        result = {vehicle.vehicle_id: vehicle for vehicle in vehicles}
+        _LOGGER.warning("ARCFOX coordinator refresh done entry=%s vehicles=%s", self.config_entry.entry_id, list(result))
+        return result

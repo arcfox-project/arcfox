@@ -12,6 +12,8 @@ __pycache__/
 *.pyc
 .env
 *.env
+ha连接信息.txt
+captcha*.png
 
 # Local probe output.
 arcfox_*.log

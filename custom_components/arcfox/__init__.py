@@ -17,6 +17,7 @@ from .api import ArcfoxApiClient
 from .const import (
     COMMAND_TRANSPORT_HTTP,
     COMMAND_TRANSPORT_MQTT,
+    COMMAND_TRANSPORT_APPSERVER,
     CONF_COMMAND_TRANSPORT,
     CONF_MQTT_CLIENT_ID,
     CONF_MQTT_HOST,
@@ -32,6 +33,7 @@ from .const import (
     CONF_BASE_URL,
     CONF_ACCESS_TOKEN,
     CONF_APP_TOKEN,
+    CONF_REMOTE_TOKEN,
     CONF_SCAN_INTERVAL,
     CONF_TIMEOUT,
     CONF_REGION,
@@ -40,7 +42,13 @@ from .const import (
     CONF_SECURITY_CODE,
     CONF_USER_ID,
     CONF_VIN,
+    CONF_AID,
+    CONF_IMEI,
+    CONF_IOV_HOST,
+    CONF_IOV_PORT,
     DEFAULT_BASE_URL,
+    DEFAULT_IOV_HOST,
+    DEFAULT_IOV_PORT,
     DEFAULT_REGION,
     DEFAULT_TIMEOUT,
     DOMAIN,
@@ -49,7 +57,7 @@ from .const import (
 from .coordinator import ArcfoxDataUpdateCoordinator
 from .protocol import COMMAND_SPECS
 from .mqtt_client import ArcfoxMqttConfig, ArcfoxMqttPublisher
-from .transport import ArcfoxBctpTransport
+from .transport import ArcfoxBctpTransport, ArcfoxAppServerCommandTransport
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -99,6 +107,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ArcfoxConfigEntry) -> bo
         if inspect.isawaitable(result):
             await result
 
+    _LOGGER.warning("ARCFOX setup: creating client entry=%s", entry.entry_id)
     client = ArcfoxApiClient(
         session=session,
         base_url=config.get(CONF_BASE_URL, DEFAULT_BASE_URL),
@@ -108,9 +117,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ArcfoxConfigEntry) -> bo
         timeout=config.get(CONF_TIMEOUT, DEFAULT_TIMEOUT),
         access_token=config.get(CONF_ACCESS_TOKEN),
         app_token=config.get(CONF_APP_TOKEN),
+        remote_token=config.get(CONF_REMOTE_TOKEN),
         password=config.get(CONF_PASSWORD),
         refresh_token=config.get(CONF_REFRESH_TOKEN),
         security_code=config.get(CONF_SECURITY_CODE),
+        aid=config.get(CONF_AID),
+        imei=config.get(CONF_IMEI),
+        iov_host=config.get(CONF_IOV_HOST, DEFAULT_IOV_HOST),
+        iov_port=int(config.get(CONF_IOV_PORT, DEFAULT_IOV_PORT)),
     )
     client.set_auth_state_callback(lambda auth_state: hass.async_create_task(_persist_auth_state(auth_state)))
     if command_mode == COMMAND_TRANSPORT_MQTT:
@@ -135,8 +149,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ArcfoxConfigEntry) -> bo
                     token_getter=lambda: client.access_token or "",
                 )
             )
+    elif command_mode == COMMAND_TRANSPORT_APPSERVER:
+        client.set_command_transport(
+            ArcfoxAppServerCommandTransport(
+                vin=config.get(CONF_VIN, ""),
+                app_token=config.get(CONF_APP_TOKEN, ""),
+                aid=str(config.get(CONF_AID, "")),
+                imei=config.get(CONF_IMEI, ""),
+                host=config.get(CONF_IOV_HOST, DEFAULT_IOV_HOST),
+                port=int(config.get(CONF_IOV_PORT, DEFAULT_IOV_PORT)),
+                timeout=config.get(CONF_TIMEOUT, DEFAULT_TIMEOUT),
+            )
+        )
     coordinator = ArcfoxDataUpdateCoordinator(hass, client, entry)
+    _LOGGER.warning("ARCFOX setup: first refresh start entry=%s", entry.entry_id)
     await coordinator.async_config_entry_first_refresh()
+    _LOGGER.warning("ARCFOX setup: first refresh done entry=%s vehicles=%s", entry.entry_id, list(coordinator.data or {}))
 
     domain_data = hass.data.setdefault(DOMAIN, {})
     entries = domain_data.setdefault(DATA_ENTRIES, {})
@@ -154,7 +182,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ArcfoxConfigEntry) -> bo
         )
         domain_data[DATA_SERVICES_REGISTERED] = True
 
+    _LOGGER.warning("ARCFOX setup: forwarding platforms entry=%s", entry.entry_id)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    _LOGGER.warning("ARCFOX setup: complete entry=%s", entry.entry_id)
     return True
 
 

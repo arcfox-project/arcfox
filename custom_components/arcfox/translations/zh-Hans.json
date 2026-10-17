@@ -2,27 +2,38 @@
   "title": "极狐",
   "config": {
     "step": {
-        "user": {
-          "title": "连接极狐车辆",
-          "description": "导入极狐 App 的 access token，或同时填写 App token 和账号密码完成 B2C 登录。VIN 可选；旧版 SDK 短信认证不再作为默认登录方式。",
-          "data": {
-            "user_id": "用户ID / 手机号",
-            "vin": "车架号 VIN（可选）",
-            "access_token": "Access token（可选）",
-            "refresh_token": "Refresh token（可选）",
-            "app_token": "App token（密码登录时必填）",
-            "password": "极狐 App 密码（可选）",
-            "base_url": "接口基础地址",
-            "region": "区域",
-            "scan_interval": "轮询间隔（分钟）",
-            "timeout": "超时（秒）"
-          }
+      "user": {
+        "title": "连接极狐车辆",
+        "description": "导入极狐 App 的 access token，或同时填写 App token 和账号密码完成 B2C 登录。VIN 可选；旧版 SDK 短信认证不再作为默认登录方式。",
+        "data": {
+          "user_id": "用户ID / 手机号",
+          "vin": "车架号 VIN（可选）",
+          "access_token": "Access token（可选）",
+          "refresh_token": "Refresh token（可选）",
+          "app_token": "App token（密码登录时必填）",
+          "password": "极狐 App 密码（可选）",
+          "base_url": "接口基础地址",
+          "region": "区域",
+          "scan_interval": "轮询间隔（分钟）",
+          "timeout": "超时（秒）",
+          "aid": "账户 AID（可选）",
+          "imei": "设备 IMEI（可选，15 位）",
+          "iov_host": "车联网网关地址",
+          "iov_port": "车联网网关端口"
+        }
       },
       "sms": {
         "title": "输入验证码",
         "description": "输入极狐发送的短信验证码。",
         "data": {
           "sms_code": "验证码"
+        }
+      },
+      "captcha": {
+        "title": "输入图片验证码",
+        "description": "账号 {phone} 登录需要图片验证码。请在极狐 App 中完成一次登录获取验证码后填入。",
+        "data": {
+          "captcha_code": "图片验证码"
         }
       }
     },
@@ -42,7 +53,11 @@
         "data": {
           "base_url": "接口基础地址",
           "scan_interval": "轮询间隔（分钟）",
-          "timeout": "超时（秒）"
+          "timeout": "超时（秒）",
+          "aid": "账户 AID（可选）",
+          "imei": "设备 IMEI（可选，15 位）",
+          "iov_host": "车联网网关地址",
+          "iov_port": "车联网网关端口"
         }
       }
     }
@@ -66,6 +81,36 @@
       },
       "connection_source": {
         "name": "连接来源"
+      },
+      "battery_temp_c": {
+        "name": "电池温度"
+      },
+      "tire_pressure_fl_kpa": {
+        "name": "左前轮胎压"
+      },
+      "tire_pressure_fr_kpa": {
+        "name": "右前轮胎压"
+      },
+      "tire_pressure_rl_kpa": {
+        "name": "左后轮胎压"
+      },
+      "tire_pressure_rr_kpa": {
+        "name": "右后轮胎压"
+      },
+      "charge_state": {
+        "name": "充电状态"
+      },
+      "charge_power_kw": {
+        "name": "充电功率"
+      },
+      "charge_voltage_v": {
+        "name": "充电电压"
+      },
+      "charge_energy_kwh": {
+        "name": "充电电量"
+      },
+      "target_soc": {
+        "name": "充电目标电量"
       }
     },
     "binary_sensor": {
@@ -77,6 +122,9 @@
       },
       "server_data_ready": {
         "name": "服务器数据已取回"
+      },
+      "vehicle_online": {
+        "name": "车辆在线"
       }
     },
     "lock": {

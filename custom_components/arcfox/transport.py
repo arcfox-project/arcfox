@@ -19,6 +19,7 @@ from aiohttp import ClientError, ClientResponseError, ClientSession
 from .bctp import BctpPublishRequest, _st_string, build_publish_request
 from .models import ArcfoxVehicle
 from .protocol import ArcfoxCommandPayload, ArcfoxCommandSpec
+from .appserver import ArcfoxAppServerClient, ArcfoxAppServerError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -254,3 +255,73 @@ class ArcfoxBctpTransport(ArcfoxCommandTransport):
         _LOGGER.debug("ARCFOX BCTP publish request: %s", request.to_dict())
         await self._publisher(request.topic, request.payload_bytes())
         return request
+
+
+class ArcfoxAppServerCommandTransport(ArcfoxCommandTransport):
+    """Deliver control commands through the AppServer TCP control channel.
+
+    The AppServer channel (port 60115) is what the official app uses for its
+    control page. It authenticates with the App token rather than the short
+    lived REST ``rcToken``, so no per-command security-code exchange is needed.
+    """
+
+    def __init__(
+        self,
+        *,
+        vin: str,
+        app_token: str,
+        aid: str,
+        imei: str,
+        host: str,
+        port: int,
+        timeout: int,
+    ) -> None:
+        self._vin = vin
+        self._app_token = app_token
+        self._aid = aid
+        self._imei = imei
+        self._host = host
+        self._port = port
+        self._timeout = timeout
+
+    async def send_command(
+        self,
+        vehicle: ArcfoxVehicle | str,
+        *,
+        action: str,
+        spec: ArcfoxCommandSpec,
+        payload: ArcfoxCommandPayload | None,
+        seq: int = 1,
+        st: str = "",
+        business_code: str | None = None,
+        cyber: dict[str, Any] | None = None,
+    ) -> Any:
+        temperature: float | None = None
+        if action == "set_climate_temperature" and payload is not None and payload.p1 is not None:
+            temperature = float(payload.p1)
+
+        def _sync_send() -> dict[str, Any]:
+            client = ArcfoxAppServerClient(
+                vin=self._vin,
+                app_token=self._app_token,
+                aid=self._aid,
+                imei=self._imei,
+                host=self._host,
+                port=self._port,
+                timeout=self._timeout,
+            )
+            try:
+                client.connect()
+                result = client.send_action(action, temperature=temperature)
+                if result.get("error"):
+                    raise ArcfoxTransportError(
+                        f"AppServer control {action} failed: {result['error']}"
+                    )
+                return result
+            except ArcfoxAppServerError as err:
+                raise ArcfoxTransportError(f"AppServer control {action} failed: {err}") from err
+            finally:
+                client.close()
+
+        _LOGGER.debug("ARCFOX AppServer command: action=%s vin=%s", action, self._vin)
+        return await asyncio.to_thread(_sync_send)

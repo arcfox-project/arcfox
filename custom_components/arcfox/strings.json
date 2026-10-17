@@ -2,26 +2,38 @@
   "title": "ARCFOX",
   "config": {
     "step": {
-        "user": {
-          "title": "Connect ARCFOX vehicle",
-          "description": "Enter your ARCFOX account details. You can either import an existing app session with an access token or request an SMS code. VIN is optional.",
-          "data": {
-            "user_id": "User ID / phone",
-            "vin": "VIN (optional)",
-            "access_token": "Access token (optional)",
-            "refresh_token": "Refresh token (optional)",
-            "security_code": "App security code (for remote control)",
-            "base_url": "API base URL",
-            "region": "Region",
-            "scan_interval": "Polling interval (minutes)",
-            "timeout": "Timeout (seconds)"
-          }
+      "user": {
+        "title": "Connect ARCFOX vehicle",
+        "description": "Enter your ARCFOX account details. You can either import an existing app session with an access token or request an SMS code. VIN is optional.",
+        "data": {
+          "user_id": "User ID / phone",
+          "vin": "VIN (optional)",
+          "access_token": "Access token (optional)",
+          "refresh_token": "Refresh token (optional)",
+          "security_code": "App security code (for remote control)",
+          "base_url": "API base URL",
+          "region": "Region",
+          "scan_interval": "Polling interval (minutes)",
+          "timeout": "Timeout (seconds)",
+          "aid": "Account AID (optional)",
+          "imei": "Device IMEI (optional, 15 digits)",
+          "iov_host": "IOv gateway host",
+          "iov_port": "IOv gateway port",
+          "password": "ARCFOX App password (optional)"
+        }
       },
       "sms": {
         "title": "Enter verification code",
         "description": "Enter the SMS verification code sent by ARCFOX.",
         "data": {
           "sms_code": "Verification code"
+        }
+      },
+      "captcha": {
+        "title": "Enter captcha",
+        "description": "Account {phone} requires an image captcha to log in. Complete one login in the ARCFOX App to obtain the code, then enter it here.",
+        "data": {
+          "captcha_code": "Captcha code"
         }
       }
     },
@@ -42,7 +54,11 @@
           "base_url": "API base URL",
           "scan_interval": "Polling interval (minutes)",
           "timeout": "Timeout (seconds)",
-          "security_code": "App security code (for remote control)"
+          "security_code": "App security code (for remote control)",
+          "aid": "Account AID (optional)",
+          "imei": "Device IMEI (optional, 15 digits)",
+          "iov_host": "IOv gateway host",
+          "iov_port": "IOv gateway port"
         }
       }
     }
@@ -66,6 +82,36 @@
       },
       "connection_source": {
         "name": "Connection source"
+      },
+      "battery_temp_c": {
+        "name": "Battery temperature"
+      },
+      "tire_pressure_fl_kpa": {
+        "name": "Tire pressure front left"
+      },
+      "tire_pressure_fr_kpa": {
+        "name": "Tire pressure front right"
+      },
+      "tire_pressure_rl_kpa": {
+        "name": "Tire pressure rear left"
+      },
+      "tire_pressure_rr_kpa": {
+        "name": "Tire pressure rear right"
+      },
+      "charge_state": {
+        "name": "Charge state"
+      },
+      "charge_power_kw": {
+        "name": "Charge power"
+      },
+      "charge_voltage_v": {
+        "name": "Charge voltage"
+      },
+      "charge_energy_kwh": {
+        "name": "Charged energy"
+      },
+      "target_soc": {
+        "name": "Charge target"
       }
     },
     "binary_sensor": {
@@ -77,6 +123,9 @@
       },
       "server_data_ready": {
         "name": "Server data ready"
+      },
+      "vehicle_online": {
+        "name": "Vehicle online"
       }
     },
     "lock": {

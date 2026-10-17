@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ARCFOX 登录验证码</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; max-width: 520px; margin: 40px auto; padding: 0 16px; }
+  h1 { font-size: 18px; }
+  #result { white-space: pre-wrap; word-break: break-all; background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 8px; padding: 12px; margin-top: 16px; min-height: 60px; display: none; }
+  button { margin-top: 16px; padding: 10px 18px; font-size: 15px; }
+  #status { color: #666; margin-top: 12px; }
+</style>
+</head>
+<body>
+  <h1>ARCFOX 极狐 · 滑块/图标验证</h1>
+  <div id="captcha"></div>
+  <p id="status">正在加载验证码…</p>
+  <div id="result"></div>
+  <button id="copy" style="display:none">复制结果 JSON</button>
+  <script src="https://gcaptcha4.geetest.com/js/gcaptcha4.js"></script>
+  <script>
+    var CAPTCHA_ID = "648f556d858f24ee0b13c6e66a12a62e";
+    var status = document.getElementById("status");
+    var result = document.getElementById("result");
+    var copyBtn = document.getElementById("copy");
+
+    function show(json) {
+      result.style.display = "block";
+      result.textContent = JSON.stringify(json, null, 2);
+      copyBtn.style.display = "inline-block";
+      status.textContent = "验证完成，复制下面的 JSON。";
+    }
+
+    window.initGeetest4({
+      captchaId: CAPTCHA_ID,
+      product: "bind",
+      language: "zh"
+    }, function (captcha) {
+      captcha.onReady(function () {
+        status.textContent = "请完成验证码。";
+        captcha.showCaptcha();
+      });
+      captcha.onSuccess(function () {
+        var v = captcha.getValidate();
+        show(v);
+      });
+      captcha.onError(function (err) {
+        status.textContent = "验证码加载失败：" + JSON.stringify(err);
+      });
+    });
+
+    copyBtn.addEventListener("click", function () {
+      var text = result.textContent;
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(function () { copyBtn.textContent = "已复制"; });
+      } else {
+        var ta = document.createElement("textarea");
+        ta.value = text; document.body.appendChild(ta); ta.select();
+        document.execCommand("copy"); document.body.removeChild(ta);
+        copyBtn.textContent = "已复制";
+      }
+    });
+  </script>
+</body>
+</html>
